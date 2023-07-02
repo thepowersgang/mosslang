@@ -1,0 +1,32 @@
+
+Project name:
+- "rust--" - Trademark issues - it's not rust
+- "r--" - R is another language, nope.
+- "rs--" - Nah...
+- "moss" - It's an older and stickier fungus :D
+
+A modern C, but with rust-like syntax
+- Full rust syntax (use `syn`'s parser?)
+  - Add post-fix deref syntax to make derefs explicit, but still ergonomic
+- Aim for C ABI compatability
+  - 
+
+type inference still exists, but no coercions.
+no generics? Or, could use the C++ route.
+no borrow checker (obviously)
+has namespaces, with simple mangling
+enums and pattern matching? Maybe. Without generics `Option` cannot be a thing, but custom types are possible.
+slices definitely
+unsized newtypes?
+
+
+Queries:
+- Slices? Definitly.
+  - But then maybe want generics, but use untyped/duck-typed ones like C++
+- Formatting?
+  - Could use printf... but that's not type safe. And requires C strings.
+  - Could use a builtin, but that's HACKY.
+  - Locally defined version of printf that takes string slices, but then what level of type checking?
+- C Strings?
+  - Option: define all string literals as ending in NUL?
+  - Option: Only byte strings (utf is allowed, but not enforced)
