@@ -33,6 +33,23 @@ fn parse_pattern_inner(lex: &mut Lexer, mut bindings: Vec<crate::Ident>) -> Resu
             }
         }
     }
+    else if lex.opt_consume_punct(lex::Punct::ParenOpen)? {
+        let mut pats = Vec::new();
+        loop {
+            if lex.opt_consume_punct(lex::Punct::ParenClose)? {
+                break;
+            }
+            pats.push(parse_pattern_inner(lex, Vec::new())?);
+            if !lex.opt_consume_punct(lex::Punct::Comma)? {
+                lex.consume_punct(lex::Punct::ParenClose)?;
+                break;
+            }
+        }
+        Pattern {
+            bindings,
+            ty: PatternTy::Tuple(pats),
+        }
+    }
     else if lex.opt_consume_rword(lex::ReservedWord::Mut)? {
         bindings.push(lex.consume_ident()?);
         if lex.opt_consume_punct(lex::Punct::At)? {

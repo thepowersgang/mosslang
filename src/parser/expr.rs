@@ -89,7 +89,17 @@ fn parse_block(lex: &mut super::Lexer) -> super::Result<e::Block> {
 }
 
 fn parse_expr(lex: &mut super::Lexer) -> super::Result<e::Expr> {
-    parse_expr_assign(lex)
+    let f = lex.set_flag(super::lex::Flag::NoStructLiteral, false);
+    let rv = parse_expr_assign(lex);
+    lex.set_flag(super::lex::Flag::NoStructLiteral, f);
+    rv
+}
+/// Parse an expression, but don't allow struct literals at the top-level
+fn parse_expr_nostruct(lex: &mut super::Lexer) -> super::Result<e::Expr> {
+    let f = lex.set_flag(super::lex::Flag::NoStructLiteral, true);
+    let rv = parse_expr_assign(lex);
+    lex.set_flag(super::lex::Flag::NoStructLiteral, f);
+    rv
 }
 
 // Precedence
@@ -131,17 +141,40 @@ macro_rules! def_binops {
 }
 // - Assignment
 fn parse_expr_assign(lex: &mut super::Lexer) -> super::Result<e::Expr> {
-    let lhs = parse_expr_eq(lex)?;
-    Ok(lhs)
+    let lhs = parse_binops_root(lex)?;
+    fn op_equals(lex: &mut super::Lexer, lhs: e::Expr, op: Option<()>) -> super::Result<e::Expr> {
+        lex.consume();
+        Ok(e::Expr::Assign {
+            slot: Box::new(lhs),
+            op,
+            value: Box::new(parse_binops_root(lex)?),
+        })
+    }
+    match lex.peek_no_eof()? {
+    Token::Punct(Punct::Equals) => op_equals(lex, lhs, None),
+    Token::Punct(Punct::PlusEquals) => op_equals(lex, lhs, Some(())),
+    Token::Punct(Punct::MinusEquals) => op_equals(lex, lhs, Some(())),
+    _ => Ok(lhs),
+    }
+}
+fn parse_binops_root(lex: &mut super::Lexer) -> super::Result<e::Expr> {
+    parse_expr_bool_or(lex)
 }
 // - Ranges
 def_binops!{
     // - Boolean OR, Boolean AND
-    //parse_expr_bool_or { DoublePipe => BoolOr };
+    parse_expr_bool_or { DoublePipe => BoolOr, DoubleAmp => BoolAnd };
     // - Equalities
     parse_expr_eq { };
     // - Orderings
-    parse_expr_cmp { };
+    parse_expr_cmp {
+        DoubleEqual => Equals,
+        ExlamEqual => NotEquals,
+        Lt => Lt,
+        Gt => Gt,
+        LtEqual => LtEquals,
+        GtEqual => LtEquals
+    };
     // - Biwise (OR, XOR, AND)
     parse_expr_bitor  { Pipe  => BitOr  };
     parse_expr_bitxor { Caret => BitXor };
@@ -174,6 +207,9 @@ fn parse_expr_cast(lex: &mut super::Lexer) -> super::Result<e::Expr> {
 fn parse_expr_leading(lex: &mut super::Lexer) -> super::Result<e::Expr> {
     Ok(if lex.opt_consume_punct(Punct::Star)? {
         e::Expr::Deref(Box::new(parse_expr_leading(lex)?))
+    }
+    else if lex.opt_consume_punct(Punct::Amp)? {
+        e::Expr::Addr(lex.opt_consume_rword(ReservedWord::Mut)?, Box::new(parse_expr_leading(lex)?))
     }
     else if lex.opt_consume_punct(Punct::Bang)? {
         e::Expr::UniOp(e::UniOpTy::Invert, Box::new(parse_expr_leading(lex)?))
@@ -237,10 +273,21 @@ fn parse_expr_trailing(lex: &mut super::Lexer) -> super::Result<e::Expr> {
     Ok(v)
 }
 
+fn parse_expr_opt(lex: &mut super::Lexer) -> super::Result<Option<e::Expr>> {
+    Ok(match lex.peek_no_eof()? {
+        Token::Punct(Punct::Semicolon)
+        | Token::Punct(Punct::ParenClose)
+        | Token::Punct(Punct::BraceClose)
+        | Token::Punct(Punct::SquareClose)
+        => None,
+        _ => Some(parse_expr(lex)?),
+        })
+}
+
 /// Bottom level values
 fn parse_expr_value(lex: &mut super::Lexer) -> super::Result<e::Expr> {
     if let Some(p) = super::opt_parse_path(lex)? {
-        return Ok(if lex.opt_consume_punct(Punct::BraceOpen)? {
+        return Ok(if !lex.has_flag(super::lex::Flag::NoStructLiteral) && lex.opt_consume_punct(Punct::BraceOpen)? {
             todo!("parse_expr_value - struct literal")
         }
         else if lex.opt_consume_punct(Punct::ParenOpen)? {
@@ -270,8 +317,14 @@ fn parse_expr_value(lex: &mut super::Lexer) -> super::Result<e::Expr> {
         super::lex::Literal::String(v) => e::Expr::LiteralString(v),
         super::lex::Literal::Integer(v, cls) => e::Expr::LiteralInteger(v, match cls {
             None => e::IntLitClass::Unspecified,
-            Some(super::lex::IntClass::I8) => e::IntLitClass::Integer(crate::ast::ty::IntClass::Signed(0)),
-            Some(super::lex::IntClass::U8) => e::IntLitClass::Integer(crate::ast::ty::IntClass::Unsigned(0)),
+            Some(super::lex::IntClass::I8 ) => e::IntLitClass::Integer(crate::ast::ty::IntClass::Signed(0)),
+            Some(super::lex::IntClass::I16) => e::IntLitClass::Integer(crate::ast::ty::IntClass::Signed(1)),
+            Some(super::lex::IntClass::I32) => e::IntLitClass::Integer(crate::ast::ty::IntClass::Signed(2)),
+            Some(super::lex::IntClass::I64) => e::IntLitClass::Integer(crate::ast::ty::IntClass::Signed(4)),
+            Some(super::lex::IntClass::U8 ) => e::IntLitClass::Integer(crate::ast::ty::IntClass::Unsigned(0)),
+            Some(super::lex::IntClass::U16) => e::IntLitClass::Integer(crate::ast::ty::IntClass::Unsigned(1)),
+            Some(super::lex::IntClass::U32) => e::IntLitClass::Integer(crate::ast::ty::IntClass::Unsigned(2)),
+            Some(super::lex::IntClass::U64) => e::IntLitClass::Integer(crate::ast::ty::IntClass::Unsigned(4)),
         }),
         _ => todo!("parse_expr_value - {:?}", lit),
         }
@@ -279,20 +332,52 @@ fn parse_expr_value(lex: &mut super::Lexer) -> super::Result<e::Expr> {
     Token::Punct(Punct::ParenOpen) => {
         lex.consume();
         let rv = parse_expr(lex)?;
-        lex.check_punct(Punct::ParenClose)?;
-        rv
+        if lex.opt_consume_punct(Punct::Comma)? {
+            // Tuple
+            let mut items = vec![rv];
+            loop {
+                if lex.check_punct(Punct::ParenClose)? {
+                    break
+                }
+                items.push(parse_expr(lex)?);
+                if !lex.opt_consume_punct(Punct::Comma)? {
+                    break
+                }
+            }
+            lex.consume_punct(Punct::ParenClose)?;
+            e::Expr::Tuple(items)
+        }
+        else {
+            lex.consume_punct(Punct::ParenClose)?;
+            rv
+        }
         },
     Token::Punct(Punct::BraceOpen) => {
         lex.consume();
         e::Expr::Block(parse_block(lex)?)
         },
+    Token::RWord(ReservedWord::Return) => {
+        lex.consume();
+        let v = parse_expr_opt(lex)?.map(Box::new);
+        e::Expr::Return(v)
+        },
+    Token::RWord(ReservedWord::Continue) => {
+        lex.consume();
+        let v = parse_expr_opt(lex)?.map(Box::new);
+        e::Expr::Continue(v)
+        },
+    Token::RWord(ReservedWord::Break) => {
+        lex.consume();
+        let v = parse_expr_opt(lex)?.map(Box::new);
+        e::Expr::Break(v)
+        },
     Token::RWord(ReservedWord::For) => {
         lex.consume();
         let pattern = super::parse_pattern(lex)?;
         lex.consume_rword(ReservedWord::In)?;
-        let start = Box::new(parse_expr(lex)?);
+        let start = Box::new(parse_expr_nostruct(lex)?);
         lex.consume_punct(Punct::DoubleDot)?;
-        let end = Box::new(parse_expr(lex)?);
+        let end = Box::new(parse_expr_nostruct(lex)?);
         lex.consume_punct(Punct::BraceOpen)?;
         let body = parse_block(lex)?;
         let else_block = if lex.opt_consume_rword(ReservedWord::Else)? {
@@ -308,6 +393,59 @@ fn parse_expr_value(lex: &mut super::Lexer) -> super::Result<e::Expr> {
             end,
             body,
             else_block,
+            }
+        },
+    Token::RWord(ReservedWord::If) => {
+        lex.consume();
+        let mut branches = Vec::new();
+        let fallback = loop {
+            let cond = parse_expr_nostruct(lex)?;
+            lex.consume_punct(Punct::BraceOpen)?;
+            let body = parse_block(lex)?;
+            branches.push(e::IfCondition { cond, body });
+
+            if !lex.opt_consume_rword(ReservedWord::Else)? {
+                break None;
+            }
+            if !lex.opt_consume_rword(ReservedWord::If)? {
+                lex.consume_punct(Punct::BraceOpen)?;
+                break Some(parse_block(lex)?)
+            }
+            // `else if` consumed, continue looping
+        };
+        e::Expr::IfChain {
+            branches,
+            fallback,
+            }
+        },
+    Token::RWord(ReservedWord::Match) => {
+        lex.consume();
+        let value = Box::new(parse_expr_nostruct(lex)?);
+        let mut branches = Vec::new();
+        
+        lex.consume_punct(Punct::BraceOpen)?;
+        loop {
+            if lex.check_punct(Punct::BraceClose)? {
+                break
+            }
+            let pat = super::parse_pattern(lex)?;
+            lex.consume_punct(Punct::FatArrow)?;
+            // If the item is a block, then allow the comma to be elided
+            let allow_no_comma = lex.check_punct(Punct::BraceOpen)?;
+            let val = parse_expr(lex)?;
+            branches.push(crate::ast::expr::MatchArm {
+                pat,
+                val,
+            });
+            if !lex.opt_consume_punct(Punct::Comma)? && !allow_no_comma {
+                break
+            }
+        }
+        lex.consume_punct(Punct::BraceClose)?;
+
+        e::Expr::Match {
+            value,
+            branches,
             }
         },
     t => todo!("parse_expr_value - {:?}", t),

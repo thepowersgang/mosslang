@@ -30,6 +30,7 @@ pub enum PatternTy {
     Any,
     MaybeBind(crate::Ident),
     NamedValue(Path),
+    Tuple(Vec<Pattern>),
 }
 
 pub struct Attribute

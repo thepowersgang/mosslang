@@ -7,6 +7,8 @@ pub struct Lexer {
     inner_iter: ::proc_macro2::token_stream::IntoIter,
     stack: Vec<StackEnt>,
     cur: Option<Token>,
+    flags: u32,
+    pushback_stack: Vec<TokenTree>,
 }
 struct StackEnt {
     iter: ::proc_macro2::token_stream::IntoIter,
@@ -27,6 +29,8 @@ impl Lexer {
             inner_iter: lexed.into_iter(),
             stack: Default::default(),
             cur: None,
+            flags: 0,
+            pushback_stack: Vec::new(),
         };
         rv.cur = rv.advance();
         Ok(rv)
@@ -38,11 +42,30 @@ impl Lexer {
         println!("advance: {:?}", rv);
         rv
     }
+
+    fn next_punct(&mut self) -> ::proc_macro2::Punct {
+        let n =  if let Some(t) = self.pushback_stack.pop() {
+                t
+            }
+            else {
+                self.stack.last_mut()
+                    .map(|v| &mut v.iter)
+                    .unwrap_or(&mut self.inner_iter)
+                    .next()
+                    .expect("Joined token but no next!")
+            };
+        let TokenTree::Punct(n) = n else { panic!("Joined token but next not Punct!") };
+        n
+    }
+
     /// Inner implementation of `advance` (before printing)
     fn advance_inner(&mut self) -> Option<Token> {
         // Loop, recursing into `TokenTree`s
         loop {
             let tt = loop {
+                if let Some(t) = self.pushback_stack.pop() {
+                    break t;
+                }
                 let Some(e) = self.stack.last_mut() else {
                     break self.inner_iter.next()?;
                     };
@@ -85,34 +108,45 @@ impl Lexer {
                 ::litrs::Literal::Integer(i) => {
                     let cls = match i.suffix() {
                         "" => None,
-                        "i8" => Some(IntClass::I8),
-                        "u8" => Some(IntClass::I8),
+                        "i8"  => Some(IntClass::I8 ), "u8"  => Some(IntClass::U8),
+                        "i16" => Some(IntClass::I16), "u16" => Some(IntClass::U16),
+                        "i32" => Some(IntClass::I32), "u32" => Some(IntClass::U32),
+                        "i64" => Some(IntClass::I64), "u64" => Some(IntClass::U64),
                         s => todo!("Integer suffix {:?}", s),
                         };
                     Literal::Integer(i.value().unwrap(), cls)
                     },
+                ::litrs::Literal::Byte(b) => Literal::Integer(b.value() as _, Some(IntClass::U8)),
+                ::litrs::Literal::Char(b) => Literal::Integer(b.value() as _, Some(IntClass::U8)),
                 l => todo!("Handle literal - {:?}", l),
                 }
                 })),
             TokenTree::Punct(p) if p.spacing() == ::proc_macro2::Spacing::Joint => return Some(Token::Punct({
-                let n = self.stack.last_mut()
-                    .map(|v| &mut v.iter)
-                    .unwrap_or(&mut self.inner_iter)
-                    .next()
-                    .expect("Joined token but no next!");
-                let TokenTree::Punct(n) = n else { panic!("Joined token but next not Punct!") };
+                let n = self.next_punct();
                 if n.spacing() == ::proc_macro2::Spacing::Joint {
-                    let n2 = self.stack.last_mut()
-                        .map(|v| &mut v.iter)
-                        .unwrap_or(&mut self.inner_iter)
-                        .next()
-                        .expect("Joined token but no next!");
-                    let TokenTree::Punct(n2) = n2 else { panic!("Joined token but next not Punct!") };
+                    let n2 = self.next_punct();
                     assert!(n2.spacing() != ::proc_macro2::Spacing::Joint);
-                    Punct::from_char3(p.as_char(), n.as_char(), n2.as_char())
+                    if let Some(v) = Punct::from_char3(p.as_char(), n.as_char(), n2.as_char()) {
+                        v
+                    }
+                    else if let Some(v) = Punct::from_char2(p.as_char(), n.as_char()) {
+                        self.pushback_stack.push(TokenTree::Punct(n2));
+                        v
+                    }
+                    else {
+                        self.pushback_stack.push(TokenTree::Punct(n2));
+                        self.pushback_stack.push(TokenTree::Punct(n));
+                        Punct::from_char1(p.as_char())
+                    }
                 }
                 else {
-                    Punct::from_char2(p.as_char(), n.as_char())
+                    if let Some(v) = Punct::from_char2(p.as_char(), n.as_char()) {
+                        v
+                    }
+                    else {
+                        self.pushback_stack.push(TokenTree::Punct(n));
+                        Punct::from_char1(p.as_char())
+                    }
                 }
                 })),
             TokenTree::Punct(p) => return Some(Token::Punct(Punct::from_char1(p.as_char()))),
@@ -237,6 +271,27 @@ impl Lexer {
     }
 }
 
+pub enum Flag {
+    NoStructLiteral,
+}
+impl Lexer
+{
+    pub fn has_flag(&self, flag: Flag) -> bool {
+        self.flags & 1 << (flag as u32) != 0
+    }
+    pub fn set_flag(&mut self, flag: Flag, val: bool) -> bool {
+        let b = 1 << (flag as u32);
+        let rv = self.flags & b != 0;
+        if val {
+            self.flags |= b;
+        }
+        else {
+            self.flags &= !b;
+        }
+        rv
+    }
+}
+
 #[derive(Debug)]
 pub enum Token {
     Ident(::proc_macro2::Ident),
@@ -267,6 +322,9 @@ pub enum ReservedWord {
     Match,
 
     In,
+    Return,
+    Break,
+    Continue,
 
     As,
 
@@ -324,16 +382,16 @@ macro_rules! define_punct {
                 _ => todo!("Unsupported punctuation character: '{}'", c),
                 }
             }
-            fn from_char2(a: char, b: char) -> Punct {
+            fn from_char2(a: char, b: char) -> Option<Punct> {
                 match (a,b) {
-                $( ($char2_1, $char2_2) => Punct::$name2, )*
-                _ => todo!("Unsupported punctuation pair: '{}{}'", a, b),
+                $( ($char2_1, $char2_2) => Some(Punct::$name2), )*
+                _ => None,
                 }
             }
-            fn from_char3(a: char, b: char, c: char) -> Punct {
+            fn from_char3(a: char, b: char, c: char) -> Option<Punct> {
                 match (a,b,c) {
-                $( ($char3_1, $char3_2, $char3_3) => Punct::$name3, )*
-                _ => todo!("Unsupported punctuation triple: '{}{}{}'", a, b, c),
+                $( ($char3_1, $char3_2, $char3_3) => Some(Punct::$name3), )*
+                _ => None,
                 }
             }
         }
@@ -348,6 +406,9 @@ define_punct!{
     Dot => '.',
     Comma => ',',
     At => '@',
+
+    Lt => '<',
+    Gt => '>',
     
     Star => '*',
     Percent => '%',
@@ -358,11 +419,28 @@ define_punct!{
     Caret => '^',
     Pipe => '|',
     Equals => '=',
+    
+    PlusEquals => '+' '=',
+    MinusEquals => '-' '=',
+    SlashEquals => '/' '=',
+    StarEquals => '*' '=',
+    PercentEquals => '%' '=',
 
     ThinArrow => '-' '>',
+    FatArrow => '=' '>',
     DoubleColon => ':' ':',
     DoubleDot => '.' '.',
     TripleDot => '.' '.' '.',
+
+    DoubleLt => '<' '<',
+    DoubleGt => '>' '>',
+    DoublePipe => '|' '|',
+    DoubleAmp => '&' '&',
+    
+    DoubleEqual => '=' '=',
+    ExlamEqual => '!' '=',
+    LtEqual => '<' '=',
+    GtEqual => '>' '=',
     
     ParenOpen =>,
     ParenClose =>,
@@ -386,5 +464,6 @@ pub enum FloatClass {
 }
 #[derive(Debug)]
 pub enum IntClass {
-    I8, U8,
+    I8, I16, I32, I64,
+    U8, U16, U32, U64,
 }

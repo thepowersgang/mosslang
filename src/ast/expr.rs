@@ -26,13 +26,26 @@ pub enum Expr
     LiteralString(Vec<u8>),
     LiteralInteger(u128, IntLitClass),
 
+    Return(Option<Box<Expr>>),
+    Continue(Option<Box<Expr>>),
+    Break(Option<Box<Expr>>),
+
+    Assign {
+        slot: Box<Expr>,
+        op: Option<()>,
+        value: Box<Expr>,
+    },
+
     NamedValue(super::Path),
     CallPath(super::Path, Vec<Expr>),
+    Tuple(Vec<Expr>),
+    //Struct(super::Path, Vec<Expr>),
 
     FieldNamed(Box<Expr>, crate::Ident),
     FieldIndex(Box<Expr>, u128),
     Index(Box<Expr>, Box<Expr>),
 
+    Addr(bool, Box<Expr>),
     Deref(Box<Expr>),
     Cast(Box<Expr>, super::Type),
 
@@ -46,7 +59,23 @@ pub enum Expr
         end: Box<Expr>,
         body: Block,
         else_block: Option<Block>,
-    }
+    },
+    IfChain {
+        branches: Vec<IfCondition>,
+        fallback: Option<Block>,
+    },
+    Match {
+        value: Box<Expr>,
+        branches: Vec<MatchArm>,
+    },
+}
+pub struct IfCondition {
+    pub cond: Expr,
+    pub body: Block,
+}
+pub struct MatchArm {
+    pub pat: super::Pattern,
+    pub val: Expr,
 }
 
 pub enum BinOpTy
@@ -60,6 +89,13 @@ pub enum BinOpTy
     BitAnd,
     BitOr,
     BitXor,
+
+    Equals, NotEquals,
+    Lt, LtEquals,
+    Gt, GtEquals,
+
+    BoolAnd,
+    BoolOr,
 }
 
 pub enum UniOpTy
