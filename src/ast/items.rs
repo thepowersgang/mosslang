@@ -1,3 +1,4 @@
+//! AST Items - Top level constructs (funtions, statics, ...)
 use crate::Ident;
 
 #[derive(Default)]
@@ -20,7 +21,7 @@ pub enum ItemType
 
     ExternBlock(ExternBlock),
 
-    TypeAlias(),
+    TypeAlias(crate::ast::Type),
     Struct(Struct),
     Enum(Enum),
     Union(Union),
@@ -31,6 +32,7 @@ pub enum ItemType
 
 pub struct ExternBlock
 {
+    pub abi: super::AbiSpec,
     pub items: Vec<ExternItem>,
 }
 pub struct ExternItem
@@ -50,13 +52,19 @@ pub struct ExternStatic {
 
 pub struct Struct
 {
+    /// Struct fields
     pub fields: Vec<StructField>,
+    /// Indicates that the struct is incomplete (aka semi-opaque)
+    pub is_incomplete: bool,
 }
 pub struct StructField
 {
+    /// Attributes on the field
     pub attributes: Vec<super::Attribute>,
+    /// Field name
     pub name: Ident,
-    //type: Type,
+    /// Field data type
+    pub ty: super::Type,
 }
 pub struct Union
 {
@@ -64,6 +72,7 @@ pub struct Union
 pub struct Enum
 {
     pub variants: Vec<EnumVariant>,
+    pub is_incomplete: bool,
 }
 pub struct EnumVariant
 {
@@ -74,7 +83,7 @@ pub struct EnumVariant
 pub enum EnumVariantTy
 {
     Bare,
-    Value(super::expr::ExpressionTy),
+    Value(super::expr::ExprRoot),
     Named(Struct),
 }
 
@@ -91,7 +100,8 @@ pub struct Function
 }
 pub struct FunctionSignature
 {
-    //pub abi: Option<Vec<u8>>,
+    /// ABI selected (note: if this is in an ExternBlock, this will be None)
+    pub abi: super::AbiSpec,
     pub args: Vec<(super::Pattern, super::Type)>,
     pub is_variadic: bool,
     pub ret: super::Type,

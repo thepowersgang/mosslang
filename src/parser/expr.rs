@@ -2,6 +2,7 @@
 use super::lex::{Token, ReservedWord, Punct};
 use crate::ast::expr as e;
 
+/// Parse the root of an expression - expecting a block
 pub fn parse_root_block(lex: &mut super::Lexer) -> super::Result<crate::ast::ExprRoot> {
     lex.consume_punct(Punct::BraceOpen)?;
     let b = parse_block(lex)?;
@@ -9,6 +10,7 @@ pub fn parse_root_block(lex: &mut super::Lexer) -> super::Result<crate::ast::Exp
         e: e::Expr::Block(b),
     })
 }
+/// Parse the root of an expression, allowing any expression
 pub fn parse_root_expr(lex: &mut super::Lexer) -> super::Result<crate::ast::ExprRoot> {
     let e = parse_expr(lex)?;
     Ok(crate::ast::ExprRoot {
@@ -152,7 +154,7 @@ def_binops!{
     parse_expr_mul { Star => Mul, Slash => Div, Percent => Rem };
     -> parse_expr_cast
 }
-// - Cast (can't use the binop code, as it's a reserved word)
+// - Cast (can't use the binop code, as `as` is reserved word not a punctuation... and the rhs is a type)
 fn parse_expr_cast(lex: &mut super::Lexer) -> super::Result<e::Expr> {
     let mut v = parse_expr_leading(lex)?;
     loop {
@@ -166,7 +168,9 @@ fn parse_expr_cast(lex: &mut super::Lexer) -> super::Result<e::Expr> {
     }
     Ok(v)
 }
-// - Leading unary ops
+/// Unary operators that come before the value
+/// 
+/// Leading deref, negate, and invert
 fn parse_expr_leading(lex: &mut super::Lexer) -> super::Result<e::Expr> {
     Ok(if lex.opt_consume_punct(Punct::Star)? {
         e::Expr::Deref(Box::new(parse_expr_leading(lex)?))
@@ -174,11 +178,14 @@ fn parse_expr_leading(lex: &mut super::Lexer) -> super::Result<e::Expr> {
     else if lex.opt_consume_punct(Punct::Bang)? {
         e::Expr::UniOp(e::UniOpTy::Invert, Box::new(parse_expr_leading(lex)?))
     }
+    else if lex.opt_consume_punct(Punct::Minus)? {
+        e::Expr::UniOp(e::UniOpTy::Negate, Box::new(parse_expr_leading(lex)?))
+    }
     else {
         parse_expr_trailing(lex)?
     })
 }
-// - Trailing unaries (call, index, field)
+/// Trailing unaries (call, index, field)
 fn parse_expr_trailing(lex: &mut super::Lexer) -> super::Result<e::Expr> {
     let mut v = parse_expr_value(lex)?;
     loop {
@@ -202,7 +209,7 @@ fn parse_expr_trailing(lex: &mut super::Lexer) -> super::Result<e::Expr> {
             lex.consume_punct(Punct::SquareClose)?;
             v = e::Expr::Index(Box::new(v), Box::new(i));
         }
-        // Field access/deref
+        // Field access/trailing-deref
         else if lex.opt_consume_punct(Punct::Dot)? {
             // Trailing deref - `(...).*`
             if lex.opt_consume_punct(Punct::Star)? {
@@ -214,7 +221,7 @@ fn parse_expr_trailing(lex: &mut super::Lexer) -> super::Result<e::Expr> {
                 v = e::Expr::FieldNamed(Box::new(v), i);
             }
             // Unnamed field - `(...).123`
-            else if let &Token::Literal(super::lex::Literal::Integer(false, i, None)) = lex.peek_no_eof()? {
+            else if let &Token::Literal(super::lex::Literal::Integer(i, None)) = lex.peek_no_eof()? {
                 lex.consume();
                 v = e::Expr::FieldIndex(Box::new(v), i);
             }
@@ -230,6 +237,7 @@ fn parse_expr_trailing(lex: &mut super::Lexer) -> super::Result<e::Expr> {
     Ok(v)
 }
 
+/// Bottom level values
 fn parse_expr_value(lex: &mut super::Lexer) -> super::Result<e::Expr> {
     if let Some(p) = super::opt_parse_path(lex)? {
         return Ok(if lex.opt_consume_punct(Punct::BraceOpen)? {
@@ -260,6 +268,11 @@ fn parse_expr_value(lex: &mut super::Lexer) -> super::Result<e::Expr> {
         match lit
         {
         super::lex::Literal::String(v) => e::Expr::LiteralString(v),
+        super::lex::Literal::Integer(v, cls) => e::Expr::LiteralInteger(v, match cls {
+            None => e::IntLitClass::Unspecified,
+            Some(super::lex::IntClass::I8) => e::IntLitClass::Integer(crate::ast::ty::IntClass::Signed(0)),
+            Some(super::lex::IntClass::U8) => e::IntLitClass::Integer(crate::ast::ty::IntClass::Unsigned(0)),
+        }),
         _ => todo!("parse_expr_value - {:?}", lit),
         }
         },
@@ -272,6 +285,30 @@ fn parse_expr_value(lex: &mut super::Lexer) -> super::Result<e::Expr> {
     Token::Punct(Punct::BraceOpen) => {
         lex.consume();
         e::Expr::Block(parse_block(lex)?)
+        },
+    Token::RWord(ReservedWord::For) => {
+        lex.consume();
+        let pattern = super::parse_pattern(lex)?;
+        lex.consume_rword(ReservedWord::In)?;
+        let start = Box::new(parse_expr(lex)?);
+        lex.consume_punct(Punct::DoubleDot)?;
+        let end = Box::new(parse_expr(lex)?);
+        lex.consume_punct(Punct::BraceOpen)?;
+        let body = parse_block(lex)?;
+        let else_block = if lex.opt_consume_rword(ReservedWord::Else)? {
+                lex.consume_punct(Punct::BraceOpen)?;
+                Some(parse_block(lex)?)
+            }
+            else {
+                None
+            };
+        e::Expr::ForLoop {
+            pattern,
+            start,
+            end,
+            body,
+            else_block,
+            }
         },
     t => todo!("parse_expr_value - {:?}", t),
     })

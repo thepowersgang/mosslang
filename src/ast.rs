@@ -11,6 +11,15 @@ pub use self::expr::ExprRoot;
 pub use self::ty::Type;
 pub use self::path::Path;
 
+pub struct Crate {
+    pub attributes: Vec<Attribute>,
+    pub module: items::Module,
+
+    // TODO: Parsed crate attributes
+}
+
+pub type AbiSpec = Option<Vec<u8>>;
+
 #[derive(Debug)]
 pub struct Pattern {
     pub bindings: Vec<crate::Ident>,
@@ -18,10 +27,18 @@ pub struct Pattern {
 }
 #[derive(Debug)]
 pub enum PatternTy {
+    Any,
     MaybeBind(crate::Ident),
     NamedValue(Path),
 }
 
 pub struct Attribute
 {
+    pub name: crate::Ident,
+    pub data: AttributeData,
+}
+pub enum AttributeData
+{
+    None,
+    Value(Vec<u8>),
 }

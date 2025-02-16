@@ -12,15 +12,16 @@ pub fn parse_type(lex: &mut Lexer) -> Result<crate::ast::Type> {
         // '[' - Array or slice
         lex::Token::Punct(lex::Punct::SquareOpen) => {
             let inner = parse_type(lex)?;
-            if lex.opt_consume_punct(lex::Punct::Semicolon)? {
+            lex.consume_punct(lex::Punct::Semicolon)?;
+            //if lex.opt_consume_punct(lex::Punct::Semicolon)? {
                 let count = super::expr::parse_root_expr(lex)?;
                 lex.consume_punct(lex::Punct::SquareClose)?;
                 Ok( crate::ast::Type::new_array(inner, count) )
-            }
-            else {
-                lex.consume_punct(lex::Punct::SquareClose)?;
-                Ok( crate::ast::Type::new_slice(inner) )
-            }
+            //}
+            //else {
+            //    lex.consume_punct(lex::Punct::SquareClose)?;
+            //    Ok( crate::ast::Type::new_slice(inner) )
+            //}
             },
         // '*' ['const'|'mut'] - Pointer
         lex::Token::Punct(lex::Punct::Star) => {

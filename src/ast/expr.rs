@@ -15,10 +15,17 @@ pub enum Statement
     Let(super::Pattern, super::Type, Option<Expr>),
 }
 
+pub enum IntLitClass {
+    Unspecified,
+    Pointer,
+    Integer(super::ty::IntClass),
+}
 pub enum Expr
 {
     Block(Block),
     LiteralString(Vec<u8>),
+    LiteralInteger(u128, IntLitClass),
+
     NamedValue(super::Path),
     CallPath(super::Path, Vec<Expr>),
 
@@ -32,6 +39,14 @@ pub enum Expr
     UniOp(UniOpTy, Box<Expr>),
     BinOp(BinOpTy, Box<Expr>, Box<Expr>),
     CallValue(Box<Expr>, Vec<Expr>),
+
+    ForLoop {
+        pattern: super::Pattern,
+        start: Box<Expr>,
+        end: Box<Expr>,
+        body: Block,
+        else_block: Option<Block>,
+    }
 }
 
 pub enum BinOpTy
@@ -50,6 +65,7 @@ pub enum BinOpTy
 pub enum UniOpTy
 {
     Invert,
+    Negate,
 }
 
 pub enum ExpressionTy

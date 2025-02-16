@@ -1,3 +1,6 @@
+//! Lexer - Convert files/strings into a sequence of tokens
+//! 
+//! This wraps `proc_macro2`'s lexer, as the idea is to use the same sort of language design
 use ::proc_macro2::TokenTree;
 
 pub struct Lexer {
@@ -10,6 +13,7 @@ struct StackEnt {
     close: Option<Punct>,
 }
 impl Lexer {
+    /// Create a lexer from a file
     pub fn from_path(path: &::std::path::Path) -> super::Result<Lexer> {
         let mut fp = ::std::fs::File::open(path)?;
         let mut buf = String::new();
@@ -28,11 +32,13 @@ impl Lexer {
         Ok(rv)
     }
 
+    /// Advance the iner state of the lexer
     fn advance(&mut self) -> Option<Token> {
         let rv = self.advance_inner();
         println!("advance: {:?}", rv);
         rv
     }
+    /// Inner implementation of `advance` (before printing)
     fn advance_inner(&mut self) -> Option<Token> {
         // Loop, recursing into `TokenTree`s
         loop {
@@ -76,6 +82,15 @@ impl Lexer {
                 {
                 ::litrs::Literal::Bool(b) => Literal::Bool(b.value()),
                 ::litrs::Literal::String(s) => Literal::String(s.value().as_bytes().to_owned()),
+                ::litrs::Literal::Integer(i) => {
+                    let cls = match i.suffix() {
+                        "" => None,
+                        "i8" => Some(IntClass::I8),
+                        "u8" => Some(IntClass::I8),
+                        s => todo!("Integer suffix {:?}", s),
+                        };
+                    Literal::Integer(i.value().unwrap(), cls)
+                    },
                 l => todo!("Handle literal - {:?}", l),
                 }
                 })),
@@ -105,13 +120,16 @@ impl Lexer {
         }
     }
     
+    /// Emit an error if the current token isn't expected
     pub fn unexpected(&self) -> super::Error {
         todo!("Unexpected token error");
     }
 
+    /// Check the current token
     pub fn peek(&self) -> &Option<Token> {
         &self.cur
     }
+    /// Check the current token, returning an error if EOF is seen
     pub fn peek_no_eof(&self) -> super::Result<&Token> {
         match self.cur {
         Some(ref v) => Ok(v),
@@ -119,11 +137,13 @@ impl Lexer {
         }
     }
 
+    /// Consume the current token
     pub fn consume(&mut self) -> Option<Token> {
         let rv = self.cur.take();
         self.cur = self.advance();
         rv
     }
+    /// Consume the current token, returning an error if EOF is seen
     pub fn consume_no_eof(&mut self) -> super::Result<Token> {
         match self.cur.take() {
         Some(v) => {
@@ -134,6 +154,7 @@ impl Lexer {
         }
     }
 
+    /// Check if the current token is a given punctuation token
     pub fn check_punct(&self, exp: Punct) -> super::Result<bool> {
         match self.cur {
         Some(Token::Punct(ref p)) if *p == exp => Ok(true),
@@ -141,6 +162,7 @@ impl Lexer {
         Some(_) => Ok(false),
         }
     }
+    /// Consume the current token, asserting that it is a given punctuation token
     pub fn consume_punct(&mut self, exp: Punct) -> super::Result<()> {
         match self.consume() {
         Some(Token::Punct(p)) if p == exp => Ok(()),
@@ -148,6 +170,7 @@ impl Lexer {
         Some(t) => todo!("Error: Expected {:?}, got {:?}", exp, t),
         }
     }
+    /// Check if the current token is a given punctuation token, consuming if it is
     pub fn opt_consume_punct(&mut self, exp: Punct) -> super::Result<bool> {
         if self.check_punct(exp)? {
             self.consume();
@@ -197,6 +220,21 @@ impl Lexer {
         Some(_) => Ok(None),
         }
     }
+
+    pub fn consume_string(&mut self) -> super::Result< Vec<u8> > {
+        match self.consume() {
+        Some(Token::Literal(Literal::String(i))) => Ok(i),
+        None => todo!("EOF error"),
+        Some(t) => todo!("Error: Expected ident, got {:?}", t),
+        }
+    }
+    pub fn opt_consume_string(&mut self) -> super::Result<Option< Vec<u8> >> {
+        match self.cur {
+        Some(Token::Literal(Literal::String(_))) => Ok(Some(self.consume_string()?)),
+        None => todo!("EOF error"),
+        Some(_) => Ok(None),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -222,10 +260,13 @@ pub enum ReservedWord {
     Fn,
     Let,
     If,
+    Else,
     For,
     While,
     Loop,
     Match,
+
+    In,
 
     As,
 
@@ -336,7 +377,7 @@ pub enum Literal {
     Bool(bool),
     String(Vec<u8>),
     Float(f64, Option<FloatClass>),
-    Integer(bool, u128, Option<IntClass>),
+    Integer(u128, Option<IntClass>),
 }
 #[derive(Debug)]
 pub enum FloatClass {
