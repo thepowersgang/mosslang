@@ -30,13 +30,13 @@ fn main() {
             }
         };
 
-    // 2. Expand
+    // 2. Expand (apply macros and conditional compilation)
     expand::expand_crate(&mut ast_crate);
 
     // 3. Flatten/simplify
     //let hir_crate = hir::from_ast(ast_crate);
-    // 4. Typecheck
+    // 4. Typecheck and populate
     //typecheck::check_crate(&mut hir_crate);
-    // 5. Translate
+    // 5. Generate output
     //codegen::generate(&args.output, ast_crate)
 }

@@ -33,13 +33,16 @@ pub enum PatternTy {
     Tuple(Vec<Pattern>),
 }
 
+#[derive(Debug)]
 pub struct Attribute
 {
     pub name: crate::Ident,
     pub data: AttributeData,
 }
+#[derive(Debug)]
 pub enum AttributeData
 {
     None,
     Value(Vec<u8>),
+    SubItems(Vec<Attribute>),
 }

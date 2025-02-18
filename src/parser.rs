@@ -149,6 +149,26 @@ fn parse_module(lex: &mut Lexer, mod_attrs: &mut Vec<crate::ast::Attribute>) -> 
             });
             },
 
+        // A constant value
+        // `const NAME: Type = value;`
+        lex::Token::RWord(lex::ReservedWord::Const) => {
+            let name = lex.consume_ident()?;
+            lex.consume_punct(lex::Punct::Colon)?;
+            let ty = parse_type(lex)?;
+            lex.consume_punct(lex::Punct::Equals)?;
+            let val = expr::parse_root_expr(lex)?;
+            lex.consume_punct(lex::Punct::Semicolon)?;
+
+            rv.items.push(Item {
+                attributes,
+                name: Some(name),
+                ty: ItemType::Constant(items::Constant {
+                    ty,
+                    value: val,
+                    }),
+            });
+            },
+
         // `fn function(args: Types) -> RetTy { code }`
         lex::Token::RWord(lex::ReservedWord::Fn) => {
             let (name, i) = parse_fn(lex, &mut attributes, None)?;

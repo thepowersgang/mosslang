@@ -17,7 +17,7 @@ pub struct Item
 /// Item type for a module-level item
 pub enum ItemType
 {
-    Module(Module),
+    //Module(Module),
 
     ExternBlock(ExternBlock),
 
@@ -27,6 +27,7 @@ pub enum ItemType
     Union(Union),
     Function(Function),
     Static(Static),
+    Constant(Constant),
     // Note: No impl blocks or traits
 }
 
@@ -88,6 +89,11 @@ pub enum EnumVariantTy
 }
 
 pub struct Static
+{
+    pub ty: super::Type,
+    pub value: crate::ast::ExprRoot,
+}
+pub struct Constant
 {
     pub ty: super::Type,
     pub value: crate::ast::ExprRoot,

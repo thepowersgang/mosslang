@@ -20,7 +20,16 @@ pub enum IntLitClass {
     Pointer,
     Integer(super::ty::IntClass),
 }
-pub enum Expr
+pub struct Expr {
+    pub kind: ExprKind,
+    // TODO: Type for typecheck
+}
+impl From<ExprKind> for Expr {
+    fn from(value: ExprKind) -> Self {
+        Expr { kind: value }
+    }
+}
+pub enum ExprKind
 {
     Block(Block),
     LiteralString(Vec<u8>),
@@ -53,6 +62,14 @@ pub enum Expr
     BinOp(BinOpTy, Box<Expr>, Box<Expr>),
     CallValue(Box<Expr>, Vec<Expr>),
 
+    Loop {
+        body: Block,
+    },
+    WhileLoop {
+        cond: Box<Expr>,
+        body: Block,
+        else_block: Option<Block>,
+    },
     ForLoop {
         pattern: super::Pattern,
         start: Box<Expr>,
@@ -89,6 +106,9 @@ pub enum BinOpTy
     BitAnd,
     BitOr,
     BitXor,
+
+    Shl,
+    Shr,
 
     Equals, NotEquals,
     Lt, LtEquals,
