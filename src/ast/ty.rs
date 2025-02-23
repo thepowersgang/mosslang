@@ -19,6 +19,12 @@ impl Type
             kind: TypeKind::Named(p),
         }
     }
+    
+    pub fn new_tuple(inner: Vec<Type>) -> Self {
+        Type {
+            kind: TypeKind::Tuple(inner),
+        }
+    }
 
     pub fn new_ptr(is_const: bool, inner: Type) -> Self {
         Type {

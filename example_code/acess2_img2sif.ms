@@ -21,8 +21,22 @@ struct SDL_Format {
 struct sFILE {
     ...
 }
+type FILE = *mut sFILE;
+const NULL: *mut () = 0;
 extern {
-    static stderr: *mut sFILE;
+    static stderr: FILE;
+	fn fopen(path: *const c_char, mode: *const c_char) -> FILE;
+	fn fclose(file: FILE);
+	fn fprintf(file: FILE, s: *const c_char, ...) -> i32;
+    fn fwrite(data: *mut (), count: usize, size: usize, fp: FILE);
+
+	fn strcmp(s1: *const c_char, s2: *const c_char) -> i32;
+	fn memcmp(s1: *const (), s2: *const (), count: usize) -> i32;
+	fn memcpy(dst: *mut (), src: *const (), count: usize) -> *mut ();
+	fn perror(msg: *const c_char);
+
+	fn malloc(size: usize) -> *mut ();
+	fn free(ptr: *mut ());
 }
 // </libc>
 
@@ -211,7 +225,7 @@ fn RLE1_7(dest: *mut u8, src: *const u8, Size: usize, BlockSize: i32, BlockStep:
 	
 	// Prevent errors
 	if Size < BlockSize { return -1; }
-	if !Src { return -1; }
+	if !src { return -1; }
 	if BlockSize <= 0 || BlockStep <= 0 { return -1; }
 	if MinRunLength < 1 {
         return -1;
@@ -302,5 +316,5 @@ fn GetARGB(srf: *mut SDL_Surface, x: i32, y: i32) -> u32
 		*( (srf.*.pixels + srf.*.format.*.BytesPerPixel*x + y * srf.*.pitch) as *const u32 ),
 		srf.*.format, &r, &g, &b, &a
 		);
-	return ((a as u32) << 24) | ((r as u32) << 16) | ((g as u32) << 8) | ((ub as u32));
+	return ((a as u32) << 24) | ((r as u32) << 16) | ((g as u32) << 8) | ((b as u32));
 }

@@ -1,11 +1,17 @@
+//! Apply pre-compilation rules
+//! 
+//! Currently just `cfg` flags
 
 pub fn expand_crate(krate: &mut super::ast::Crate)
 {
+    check_attrs(&mut krate.attributes);
     expand_module(&mut krate.module);
 }
 fn expand_module(module: &mut super::ast::items::Module) {
     
+    println!("expand_module: {} items", module.items.len());
     module.items.retain_mut(|v| check_attrs(&mut v.attributes));
+    println!("expand_module: {} items", module.items.len());
 
     for v in &mut module.items {
         use crate::ast::items::ItemType;
@@ -82,7 +88,7 @@ fn check_attrs(attrs: &mut Vec<crate::ast::Attribute>) -> bool {
             true
         }
     });
-    cfg_fail
+    ! cfg_fail
 }
 fn check_cfg(a: &crate::ast::Attribute) -> bool {
     match &a.data {

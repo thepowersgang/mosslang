@@ -482,7 +482,7 @@ fn parse_expr_value(lex: &mut super::Lexer) -> super::Result<e::Expr> {
         };
         e::ExprKind::IfChain {
             branches,
-            fallback,
+            else_block: fallback,
             }.into()
         },
     // `match value { ... }`

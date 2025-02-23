@@ -79,7 +79,7 @@ pub enum ExprKind
     },
     IfChain {
         branches: Vec<IfCondition>,
-        fallback: Option<Block>,
+        else_block: Option<Block>,
     },
     Match {
         value: Box<Expr>,

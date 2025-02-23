@@ -4,6 +4,7 @@ use proc_macro2::Ident;
 mod ast;
 mod parser;
 mod expand;
+mod resolve;
 mod codegen;
 
 #[derive(::gumdrop::Options)]
@@ -33,10 +34,12 @@ fn main() {
     // 2. Expand (apply macros and conditional compilation)
     expand::expand_crate(&mut ast_crate);
 
+    resolve::resolve(&mut ast_crate);
+
     // 3. Flatten/simplify
     //let hir_crate = hir::from_ast(ast_crate);
     // 4. Typecheck and populate
     //typecheck::check_crate(&mut hir_crate);
     // 5. Generate output
-    //codegen::generate(&args.output, ast_crate)
+    //codegen::generate(&args.output, ast_crate);
 }

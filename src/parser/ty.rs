@@ -9,6 +9,29 @@ pub fn parse_type(lex: &mut Lexer) -> Result<crate::ast::Type> {
     else {
         match lex.consume_no_eof()?
         {
+        // `(` - Tuple or grouping
+        lex::Token::Punct(lex::Punct::ParenOpen) => {
+            if lex.opt_consume_punct(lex::Punct::ParenClose)? {
+                Ok( crate::ast::Type::new_unit() )
+            }
+            else {
+                let inner = parse_type(lex)?;
+                if lex.opt_consume_punct(lex::Punct::ParenClose)? {
+                    Ok( inner )
+                }
+                else {
+                    let mut v = vec![inner];
+                    while lex.opt_consume_punct(lex::Punct::Comma)? {
+                        if lex.check_punct(lex::Punct::ParenClose)? {
+                            break ;
+                        }
+                        v.push(parse_type(lex)?);
+                    }
+                    lex.consume_punct(lex::Punct::ParenClose)?;
+                    Ok( crate::ast::Type::new_tuple(v) )
+                }
+            }
+            },
         // '[' - Array or slice
         lex::Token::Punct(lex::Punct::SquareOpen) => {
             let inner = parse_type(lex)?;
