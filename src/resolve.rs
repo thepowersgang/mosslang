@@ -208,7 +208,7 @@ fn resolve_expr(item_scope: &ItemScope, expr: &mut crate::ast::ExprRoot, args: &
     }
     impl crate::ast::ExprVisitor for Context<'_> {
         fn visit_mut_pattern(&mut self, p: &mut crate::ast::Pattern, refutable: bool) {
-            println!("{:?}", p);
+            println!("Patern: {:?}", p);
             for b in &p.bindings {
                 self.define_var(b);
             }

@@ -22,6 +22,7 @@ pub type AbiSpec = Option<Vec<u8>>;
 
 #[derive(Debug)]
 pub struct Pattern {
+    pub span: crate::Span,
     pub bindings: Vec<crate::Ident>,
     pub ty: PatternTy,
 }

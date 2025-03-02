@@ -6,13 +6,13 @@ use ::proc_macro2::TokenTree;
 pub struct Lexer {
     inner_iter: ::proc_macro2::token_stream::IntoIter,
     stack: Vec<StackEnt>,
-    cur: Option<Token>,
+    cur: Option<(crate::Span,Token,)>,
     flags: u32,
     pushback_stack: Vec<TokenTree>,
 }
 struct StackEnt {
     iter: ::proc_macro2::token_stream::IntoIter,
-    close: Option<Punct>,
+    close: Option<(Punct,crate::Span,)>,
 }
 impl Lexer {
     /// Create a lexer from a file
@@ -36,8 +36,12 @@ impl Lexer {
         Ok(rv)
     }
 
+    pub fn cur_span(&self) -> crate::Span {
+        self.cur.as_ref().unwrap().0
+    }
+
     /// Advance the iner state of the lexer
-    fn advance(&mut self) -> Option<Token> {
+    fn advance(&mut self) -> Option<(crate::Span, Token)> {
         let rv = self.advance_inner();
         println!("advance: {:?}", rv);
         rv
@@ -59,7 +63,7 @@ impl Lexer {
     }
 
     /// Inner implementation of `advance` (before printing)
-    fn advance_inner(&mut self) -> Option<Token> {
+    fn advance_inner(&mut self) -> Option<(crate::Span,Token)> {
         // Loop, recursing into `TokenTree`s
         loop {
             let tt = loop {
@@ -74,8 +78,8 @@ impl Lexer {
                     break tt;
                 }
                 
-                if let Some(rv) = self.stack.pop().unwrap().close {
-                    return Some(Token::Punct(rv));
+                if let Some((rv,span)) = self.stack.pop().unwrap().close {
+                    return Some((span, Token::Punct(rv)));
                 }
             };
     
@@ -85,22 +89,22 @@ impl Lexer {
                 use ::proc_macro2::Delimiter;
                 let (open,close) = match g.delimiter() {
                     Delimiter::None => (None, None),
-                    Delimiter::Brace       => (Some(Punct::BraceOpen ), Some(Punct::BraceClose )),
-                    Delimiter::Bracket     => (Some(Punct::SquareOpen), Some(Punct::SquareClose)),
-                    Delimiter::Parenthesis => (Some(Punct::ParenOpen ), Some(Punct::ParenClose )),
+                    Delimiter::Brace       => (Some(Punct::BraceOpen ), Some((Punct::BraceClose , g.span_close()))),
+                    Delimiter::Bracket     => (Some(Punct::SquareOpen), Some((Punct::SquareClose, g.span_close()))),
+                    Delimiter::Parenthesis => (Some(Punct::ParenOpen ), Some((Punct::ParenClose , g.span_close()))),
                     };
                 self.stack.push(StackEnt { iter: g.stream().into_iter(), close });
                 if let Some(rv) = open {
-                    return Some(Token::Punct(rv));
+                    return Some((g.span_open(), Token::Punct(rv),));
                 }
                 // Loop
                 },
-            TokenTree::Ident(i) => return Some(match i.to_string().parse()
+            TokenTree::Ident(i) => return Some((i.span(), match i.to_string().parse()
                 {
                 Ok(v) => Token::RWord(v),
                 Err(_) => Token::Ident(i),
-                }),
-            TokenTree::Literal(l) => return Some(Token::Literal({
+                })),
+            TokenTree::Literal(l) => return Some((l.span(), Token::Literal({
                 match ::litrs::Literal::from(l)
                 {
                 ::litrs::Literal::Bool(b) => Literal::Bool(b.value()),
@@ -120,8 +124,8 @@ impl Lexer {
                 ::litrs::Literal::Char(b) => Literal::Integer(b.value() as _, Some(IntClass::U8)),
                 l => todo!("Handle literal - {:?}", l),
                 }
-                })),
-            TokenTree::Punct(p) if p.spacing() == ::proc_macro2::Spacing::Joint => return Some(Token::Punct({
+                }),)),
+            TokenTree::Punct(p) if p.spacing() == ::proc_macro2::Spacing::Joint => return Some((p.span(),Token::Punct({
                 let n = self.next_punct();
                 if n.spacing() == ::proc_macro2::Spacing::Joint {
                     let n2 = self.next_punct();
@@ -148,8 +152,8 @@ impl Lexer {
                         Punct::from_char1(p.as_char())
                     }
                 }
-                })),
-            TokenTree::Punct(p) => return Some(Token::Punct(Punct::from_char1(p.as_char()))),
+                }))),
+            TokenTree::Punct(p) => return Some((p.span(), Token::Punct(Punct::from_char1(p.as_char())),)),
             }
         }
     }
@@ -160,13 +164,13 @@ impl Lexer {
     }
 
     /// Check the current token
-    pub fn peek(&self) -> &Option<Token> {
-        &self.cur
+    pub fn peek(&self) -> Option<&Token> {
+        self.cur.as_ref().map(|v| &v.1)
     }
     /// Check the current token, returning an error if EOF is seen
     pub fn peek_no_eof(&self) -> super::Result<&Token> {
         match self.cur {
-        Some(ref v) => Ok(v),
+        Some((_, ref v)) => Ok(v),
         None => todo!("EOF error"),
         }
     }
@@ -175,12 +179,12 @@ impl Lexer {
     pub fn consume(&mut self) -> Option<Token> {
         let rv = self.cur.take();
         self.cur = self.advance();
-        rv
+        rv.map(|v| v.1)
     }
     /// Consume the current token, returning an error if EOF is seen
     pub fn consume_no_eof(&mut self) -> super::Result<Token> {
         match self.cur.take() {
-        Some(v) => {
+        Some((_, v)) => {
             self.cur = self.advance();
             Ok(v)
             },
@@ -191,7 +195,7 @@ impl Lexer {
     /// Check if the current token is a given punctuation token
     pub fn check_punct(&self, exp: Punct) -> super::Result<bool> {
         match self.cur {
-        Some(Token::Punct(ref p)) if *p == exp => Ok(true),
+        Some((_, Token::Punct(ref p))) if *p == exp => Ok(true),
         None => Ok(false),
         Some(_) => Ok(false),
         }
@@ -218,7 +222,7 @@ impl Lexer {
 
     pub fn check_rword(&self, exp: ReservedWord) -> super::Result<bool> {
         match self.cur {
-        Some(Token::RWord(ref have)) if *have == exp => Ok(true),
+        Some((_, Token::RWord(ref have))) if *have == exp => Ok(true),
         None => todo!("EOF error"),
         Some(_) => Ok(false),
         }
@@ -249,7 +253,7 @@ impl Lexer {
     }
     pub fn opt_consume_ident(&mut self) -> super::Result<Option<::proc_macro2::Ident>> {
         match self.cur {
-        Some(Token::Ident(_)) => Ok(Some(self.consume_ident()?)),
+        Some((_, Token::Ident(_))) => Ok(Some(self.consume_ident()?)),
         None => todo!("EOF error"),
         Some(_) => Ok(None),
         }
@@ -264,7 +268,7 @@ impl Lexer {
     }
     pub fn opt_consume_string(&mut self) -> super::Result<Option< Vec<u8> >> {
         match self.cur {
-        Some(Token::Literal(Literal::String(_))) => Ok(Some(self.consume_string()?)),
+        Some((_, Token::Literal(Literal::String(_)))) => Ok(Some(self.consume_string()?)),
         None => todo!("EOF error"),
         Some(_) => Ok(None),
         }
