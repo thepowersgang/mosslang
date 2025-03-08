@@ -76,17 +76,21 @@ impl<'a> Visitor<'a> {
             Some(_) => todo!("op-assign"),
             None => match v_slot {
                 Value::Unreachable => Value::Unreachable,
-                Value::StringLiteral(items) => todo!(),
-                Value::IntegerLiteral(_) => todo!(),
-                Value::ImplicitUnit => todo!(),
+                Value::StringLiteral(_) => panic!("Type error: Assigning to string literal"),
+                Value::IntegerLiteral(_) => panic!("Type error: Assigning to integer literal"),
+                Value::ImplicitUnit => panic!("Type error: Assigning to unit"),
                 Value::Local(local_index, wrapper_list) => {
                     self.output.push_stmt(Operation::AssignLocal(local_index, wrapper_list, v_value));
                     Value::ImplicitUnit
                     },
                 Value::Named(absolute_path, wrapper_list) => {
-                    //self.output.push_stmt(Operation::AssignNamed(local_index, wrapper_list, v_value));
-                    //Value::ImplicitUnit
-                    todo!("Assign to a named deref?")
+                    if wrapper_list.is_empty() {
+                        self.output.push_stmt(Operation::AssignNamed(absolute_path, v_value));
+                    }
+                    else {
+                        todo!("Assign to a named deref?")
+                    }
+                    Value::ImplicitUnit
                     },
                 }
             }
@@ -96,10 +100,10 @@ impl<'a> Visitor<'a> {
             use crate::ast::path::ValueBinding;
             match b {
             ValueBinding::Local(i) => Value::Local(super::LocalIndex(*i as _), Default::default()),
-            ValueBinding::Function(absolute_path) => todo!(),
+            ValueBinding::Function(absolute_path) => todo!("function pointer"),
             ValueBinding::Static(ap) => Value::Named(ap.clone(), Default::default()),
-            ValueBinding::Constant(absolute_path) => todo!(),
-            ValueBinding::StructValue(absolute_path) => todo!(),
+            ValueBinding::Constant(absolute_path) => todo!("constant"),
+            ValueBinding::StructValue(absolute_path) => todo!("function pointer - struct"),
             ValueBinding::EnumVariant(absolute_path, idx) => {
                 // HACK: Assume that the variant isn't a data-holding variant
                 Value::IntegerLiteral(*idx as _)
@@ -118,14 +122,17 @@ impl<'a> Visitor<'a> {
                 self.output.end_block(Terminator::CallPath(rv, next_block, absolute_path.clone(), a));
                 self.output.start_block(next_block);
             },
-            ValueBinding::Static(ap) => todo!(),
+            ValueBinding::Static(absolute_path) => todo!(),
             ValueBinding::Constant(absolute_path) => todo!(),
             ValueBinding::StructValue(absolute_path) => todo!(),
             ValueBinding::EnumVariant(absolute_path, idx) => todo!(),
             }
             Value::Local(rv, Default::default())
         },
-        ExprKind::Tuple(exprs) => todo!(),
+        ExprKind::Tuple(exprs) => {
+            let a: Vec<_> = exprs.iter().map(|e| self.visit_expr(e)).collect();
+            todo!()
+        },
         ExprKind::FieldNamed(expr, ident) => {
             let v = self.visit_expr(expr);
             todo!("Get field index for {} from {:?}", ident, expr.data_ty);
@@ -191,14 +198,12 @@ impl<'a> Visitor<'a> {
         },
         ExprKind::BinOp(bin_op_ty, expr_l, expr_r) => {
             let rv = self.output.allocate_slot(&expr.data_ty);
-            let v_l = self.visit_expr(expr_l);
-            let v_r = self.visit_expr(expr_r);
 
             use crate::ast::expr::Expr;
             fn binop(this: &mut Visitor, rv: super::LocalIndex, expr_l: &Expr, op: super::BinOp, expr_r: &Expr) {
                 let v_l = this.visit_expr(expr_l);
                 let v_r = this.visit_expr(expr_r);
-                this.output.push_stmt(Operation::BinOp(rv, v_l, super::BinOp::Sub, v_r))
+                this.output.push_stmt(Operation::BinOp(rv, v_l, op, v_r))
             }
             fn cmp(this: &mut Visitor, rv: super::LocalIndex, expr_l: &Expr, op: super::CmpOp, expr_r: &Expr) {
                 let v_l = this.visit_expr(expr_l);

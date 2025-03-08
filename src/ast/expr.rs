@@ -39,7 +39,7 @@ impl From<ExprKind> for Expr {
 pub enum ExprKind
 {
     Block(Block),
-    LiteralString(Vec<u8>),
+    LiteralString(crate::ast::StringLiteral),
     LiteralInteger(u128, IntLitClass),
 
     Return(Option<Box<Expr>>),

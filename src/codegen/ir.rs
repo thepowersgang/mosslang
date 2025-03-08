@@ -6,7 +6,7 @@ pub enum Value {
     ImplicitUnit,
     Local(LocalIndex, WrapperList),
     Named(crate::ast::path::AbsolutePath, WrapperList),
-    StringLiteral(Vec<u8>),
+    StringLiteral(crate::ast::StringLiteral),
     IntegerLiteral(u128, ),
 }
 impl Value {
@@ -82,7 +82,7 @@ enum Wrapper {
 #[derive(Debug)]
 pub enum Operation {
     AssignLocal(LocalIndex, WrapperList, Value),
-    AssignNamed(crate::ast::Path, Value),
+    AssignNamed(crate::ast::path::AbsolutePath, Value),
     //CreateLiteral(LocalIndex, ),
     BinOp(LocalIndex, Value, BinOp, Value),
     UniOp(LocalIndex, UniOp, Value),

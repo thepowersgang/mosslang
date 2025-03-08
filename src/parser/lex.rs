@@ -108,7 +108,7 @@ impl Lexer {
                 match ::litrs::Literal::from(l)
                 {
                 ::litrs::Literal::Bool(b) => Literal::Bool(b.value()),
-                ::litrs::Literal::String(s) => Literal::String(s.value().as_bytes().to_owned()),
+                ::litrs::Literal::String(s) => Literal::String(crate::ast::StringLiteral::from_bytes(s.value().as_bytes().to_owned())),
                 ::litrs::Literal::Integer(i) => {
                     let cls = match i.suffix() {
                         "" => None,
@@ -259,14 +259,14 @@ impl Lexer {
         }
     }
 
-    pub fn consume_string(&mut self) -> super::Result< Vec<u8> > {
+    pub fn consume_string(&mut self) -> super::Result< crate::ast::StringLiteral > {
         match self.consume() {
         Some(Token::Literal(Literal::String(i))) => Ok(i),
         None => todo!("EOF error"),
         Some(t) => todo!("Error: Expected ident, got {:?}", t),
         }
     }
-    pub fn opt_consume_string(&mut self) -> super::Result<Option< Vec<u8> >> {
+    pub fn opt_consume_string(&mut self) -> super::Result<Option< crate::ast::StringLiteral >> {
         match self.cur {
         Some((_, Token::Literal(Literal::String(_)))) => Ok(Some(self.consume_string()?)),
         None => todo!("EOF error"),
@@ -457,7 +457,7 @@ define_punct!{
 #[derive(Debug)]
 pub enum Literal {
     Bool(bool),
-    String(Vec<u8>),
+    String(crate::ast::StringLiteral),
     Float(f64, Option<FloatClass>),
     Integer(u128, Option<IntClass>),
 }

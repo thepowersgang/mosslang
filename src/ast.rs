@@ -18,7 +18,31 @@ pub struct Crate {
     // TODO: Parsed crate attributes
 }
 
-pub type AbiSpec = Option<Vec<u8>>;
+#[derive(Clone)]
+pub struct StringLiteral(Vec<u8>);
+impl StringLiteral {
+    pub fn from_bytes(v: Vec<u8>) -> Self {
+        StringLiteral(v)
+    }
+}
+impl ::core::fmt::Debug for StringLiteral {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("\"")?;
+        for &c in &self.0 {
+            match c {
+            b'\"'|b'\\' => write!(f, "\\{}", c as char)?,
+            b' '..0x7F => write!(f, "{}", c as char)?,
+            10 => write!(f, "\\n")?,
+            13 => write!(f, "\\r")?,
+            _ => write!(f, "\\x{:02x}", c)?,
+            }
+        }
+        f.write_str("\"")?;
+        Ok( () )
+    }
+}
+
+pub type AbiSpec = Option<StringLiteral>;
 
 #[derive(Debug)]
 pub struct Pattern {
@@ -58,7 +82,7 @@ pub struct Attribute
 pub enum AttributeData
 {
     None,
-    Value(Vec<u8>),
+    Value(StringLiteral),
     SubItems(Vec<Attribute>),
 }
 
