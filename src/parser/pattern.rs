@@ -1,20 +1,21 @@
 use super::Result;
 use super::Lexer;
 use super::lex;
+use crate::ast::PatternBinding;
 
 use crate::ast::{Pattern, PatternTy};
 
 pub fn parse_pattern(lex: &mut Lexer) -> Result<crate::ast::Pattern> {
     parse_pattern_inner(lex, Vec::new())
 }
-fn parse_pattern_inner(lex: &mut Lexer, mut bindings: Vec<crate::Ident>) -> Result<crate::ast::Pattern> {
+fn parse_pattern_inner(lex: &mut Lexer, mut bindings: Vec<PatternBinding>) -> Result<crate::ast::Pattern> {
     let span = lex.cur_span();
     Ok(if let Some(p) = super::opt_parse_path(lex)? {
         if p.is_trivial() {
             if lex.opt_consume_punct(lex::Punct::At)? {
                 // Binding!
                 let mut bindings = bindings;
-                bindings.push(p.into_trivial().ok().unwrap());
+                bindings.push(PatternBinding { name: p.into_trivial().ok().unwrap(), index: None });
                 // Recurse
                 return parse_pattern_inner(lex, bindings);
             }
@@ -53,7 +54,7 @@ fn parse_pattern_inner(lex: &mut Lexer, mut bindings: Vec<crate::Ident>) -> Resu
         }
     }
     else if lex.opt_consume_rword(lex::ReservedWord::Mut)? {
-        bindings.push(lex.consume_ident()?);
+        bindings.push(PatternBinding { name: lex.consume_ident()?, index: None });
         if lex.opt_consume_punct(lex::Punct::At)? {
             return parse_pattern_inner(lex, bindings);
         }

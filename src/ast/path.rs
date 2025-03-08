@@ -1,5 +1,5 @@
 
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 pub struct Path
 {
     pub root: Root,
@@ -21,7 +21,7 @@ impl Path
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 pub enum Root
 {
     None,   // Relative
@@ -37,17 +37,30 @@ impl AbsolutePath {
         AbsolutePath(self.0.iter().cloned().chain(::std::iter::once(v)).collect())
     }
 }
-#[derive(Clone)]
+impl ::core::fmt::Debug for AbsolutePath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        ::core::fmt::Display::fmt(self, f)
+    }
+}
+impl ::core::fmt::Display for AbsolutePath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for c in &self.0 {
+            write!(f, "::{}", c)?;
+        }
+        Ok(())
+    }
+}
+#[derive(Clone,Debug)]
 pub enum ValueBinding
 {
-    Local(usize),
+    Local(u32),
     Function(AbsolutePath),
     Static(AbsolutePath),
     Constant(AbsolutePath),
     StructValue(AbsolutePath),
     EnumVariant(AbsolutePath, usize)
 }
-#[derive(Clone)]
+#[derive(Clone,Debug)]
 pub enum TypeBinding
 {
     Alias(AbsolutePath),

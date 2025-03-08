@@ -2,6 +2,7 @@ use crate::ast::path::ValueBinding;
 use crate::ast::path::TypeBinding;
 use crate::ast::path::AbsolutePath;
 use std::collections::HashMap;
+use crate::INDENT;
 
 pub fn resolve(ast_crate: &mut crate::ast::Crate)
 {
@@ -10,7 +11,8 @@ pub fn resolve(ast_crate: &mut crate::ast::Crate)
 }
 pub fn resolve_mod(module: &mut crate::ast::items::Module)
 {
-    println!("resolve_mod: {} items", module.items.len());
+    let _i = INDENT.inc("resolve_mod");
+    println!("{INDENT}resolve_mod: {} items", module.items.len());
 
     // Make a list of items for use by inner resolve
     let item_scope = {
@@ -116,6 +118,7 @@ pub fn resolve_mod(module: &mut crate::ast::items::Module)
         ItemType::Union(_) => {
         },
         ItemType::Function(function) => {
+            println!("{INDENT}resolve_mod: Function {}", v.name.as_ref().unwrap());
             for a in &mut function.sig.args {
                 resolve_type(&item_scope, &mut a.1);
             }
@@ -123,6 +126,7 @@ pub fn resolve_mod(module: &mut crate::ast::items::Module)
             resolve_expr(&item_scope, &mut function.code, &mut function.sig.args);
         },
         ItemType::Static(s) => {
+            println!("{INDENT}resolve_mod: Static {}", v.name.as_ref().unwrap());
             resolve_type(&item_scope, &mut s.ty);
             resolve_expr(&item_scope, &mut s.value, &mut []);
         },
@@ -149,7 +153,7 @@ fn resolve_type(item_scope: &ItemScope, ty: &mut crate::ast::Type)
 
 fn resolve_expr(item_scope: &ItemScope, expr: &mut crate::ast::ExprRoot, args: &mut [(crate::ast::Pattern, crate::ast::Type)])
 {
-    println!("resolve_expr");
+    let _i = INDENT.inc("resolve_expr");
     let mut c = Context {
         item_scope,
         next_index: 0,
@@ -162,22 +166,28 @@ fn resolve_expr(item_scope: &ItemScope, expr: &mut crate::ast::ExprRoot, args: &
         }
     }
     crate::ast::visit_mut_expr(&mut c, &mut expr.e);
+    expr.variable_count = c.next_index as usize;
 
 
     #[derive(Default)]
     struct ContextLayer {
-        names: ::std::collections::HashMap<crate::Ident, usize>,
+        names: ::std::collections::HashMap<crate::Ident, u32>,
     }
     struct Context<'a> {
         item_scope: &'a ItemScope,
-        next_index: usize,
+        next_index: u32,
         layers: Vec<ContextLayer>,
     }
     impl Context<'_> {
-        fn define_var(&mut self, name: &crate::Ident) {
+        fn define_var(&mut self, name: &crate::Ident) -> u32 {
             if let Some(l) = self.layers.last_mut() {
-                l.names.insert(name.clone(), self.next_index);
+                let rv = self.next_index;
+                l.names.insert(name.clone(), rv);
                 self.next_index += 1;
+                rv
+            }
+            else {
+                todo!("Defining variable with no layers?")
             }
         }
 
@@ -208,9 +218,9 @@ fn resolve_expr(item_scope: &ItemScope, expr: &mut crate::ast::ExprRoot, args: &
     }
     impl crate::ast::ExprVisitor for Context<'_> {
         fn visit_mut_pattern(&mut self, p: &mut crate::ast::Pattern, refutable: bool) {
-            println!("Patern: {:?}", p);
-            for b in &p.bindings {
-                self.define_var(b);
+            println!("{INDENT}Patern: {:?}", p);
+            for b in &mut p.bindings {
+                b.index = Some(self.define_var(&b.name));
             }
             use crate::ast::PatternTy;
             match &mut p.ty {
@@ -226,8 +236,10 @@ fn resolve_expr(item_scope: &ItemScope, expr: &mut crate::ast::ExprRoot, args: &
                         return ;
                     }
                 }
-                p.bindings.push(ident.clone());
-                self.define_var(ident);
+                p.bindings.push(crate::ast::PatternBinding {
+                    name: ident.clone(),
+                    index: Some(self.define_var(ident)),
+                    });
                 p.ty = PatternTy::Any;
             },
             PatternTy::NamedValue(_) => {},
@@ -240,12 +252,14 @@ fn resolve_expr(item_scope: &ItemScope, expr: &mut crate::ast::ExprRoot, args: &
         }
         fn visit_mut_expr(&mut self, expr: &mut crate::ast::expr::Expr) {
             use crate::ast::expr::ExprKind;
+            let expr_p: *const _ = expr;
             match &mut expr.kind {
-            ExprKind::CallPath(p, ..) => {
-                self.resolve_path_value(p);
+            ExprKind::CallPath(p, binding, ..) => {
+                *binding = Some(self.resolve_path_value(p));
                 },
-            ExprKind::NamedValue(p) => {
-                self.resolve_path_value(p);
+            ExprKind::NamedValue(p, binding) => {
+                *binding = Some(self.resolve_path_value(p));
+                println!("{INDENT}NamedValue: {:?} = {:?} @ {:p}", p, binding.as_ref().unwrap(), expr_p);
                 },
             _ => {},
             }
@@ -263,12 +277,12 @@ fn resolve_expr(item_scope: &ItemScope, expr: &mut crate::ast::ExprRoot, args: &
             ExprKind::ForLoop { pattern, start, end, body, else_block } => {
                 self.layers.push(ContextLayer::default());
                 self.visit_mut_pattern(pattern, false);
-                crate::ast::visit_mut_expr(self, start);
-                crate::ast::visit_mut_expr(self, end);
-                crate::ast::visit_mut_block(self, body);
+                self.visit_mut_expr(start);
+                self.visit_mut_expr(end);
+                self.visit_mut_block(body);
                 self.layers.pop();
                 if let Some(block) = else_block {
-                    crate::ast::visit_mut_block(self, block);
+                    self.visit_mut_block(block);
                 }
             }
             _ => crate::ast::visit_mut_expr(self, expr),

@@ -1,6 +1,7 @@
 
 use super::lex::{Token, ReservedWord, Punct};
 use crate::ast::expr as e;
+use crate::INDENT;
 
 /// Parse the root of an expression - expecting a block
 pub fn parse_root_block(lex: &mut super::Lexer) -> super::Result<crate::ast::ExprRoot> {
@@ -8,6 +9,8 @@ pub fn parse_root_block(lex: &mut super::Lexer) -> super::Result<crate::ast::Exp
     let b = parse_block(lex)?;
     Ok(crate::ast::ExprRoot {
         e: e::ExprKind::Block(b).into(),
+        variable_count: 0,
+        variables: Default::default(),
     })
 }
 /// Parse the root of an expression, allowing any expression
@@ -15,41 +18,10 @@ pub fn parse_root_expr(lex: &mut super::Lexer) -> super::Result<crate::ast::Expr
     let e = parse_expr(lex)?;
     Ok(crate::ast::ExprRoot {
         e,
+        variable_count: 0,
+        variables: Default::default(),
     })
 }
-
-mod indent {
-    use ::std::sync::atomic::{AtomicUsize, Ordering};
-    pub struct Indent {
-        v: ::std::sync::atomic::AtomicUsize,
-    }
-    impl Indent {
-        pub const fn new() -> Self {
-            Indent { v: AtomicUsize::new(0) }
-        }
-        pub fn inc<'a>(&'a self, name: &'a str) -> Inc<'a> {
-            println!("{}> {}", self, name);
-            self.v.fetch_add(1, Ordering::Relaxed);
-            Inc(self, name)
-        }
-    }
-    impl ::std::fmt::Display for Indent {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            for _ in 0 .. self.v.load(Ordering::Relaxed) {
-                f.write_str(" ")?;
-            }
-            Ok(())
-        }
-    }
-    pub struct Inc<'a>(&'a Indent, &'a str);
-    impl ::std::ops::Drop for Inc<'_> {
-        fn drop(&mut self) {
-            self.0.v.fetch_sub(1, Ordering::Relaxed);
-            println!("{}< {}", self.0, self.1);
-        }
-    }
-}
-static INDENT: indent::Indent = indent::Indent::new();
 
 fn parse_block(lex: &mut super::Lexer) -> super::Result<e::Block> {
     let _i = INDENT.inc("parse_block");
@@ -229,7 +201,7 @@ fn parse_expr_cast(lex: &mut super::Lexer) -> super::Result<e::Expr> {
     loop {
         if lex.opt_consume_rword(ReservedWord::As)? {
             let ty = super::parse_type(lex)?;
-            v = e::Expr { kind: e::ExprKind::Cast(Box::new(v), ty) };
+            v = e::Expr { kind: e::ExprKind::Cast(Box::new(v), ty), data_ty: crate::ast::Type::new_infer() };
         }
         else {
             break;
@@ -339,10 +311,10 @@ fn parse_expr_value(lex: &mut super::Lexer) -> super::Result<e::Expr> {
                 }
             }
             println!("{:?}", lex.peek());
-            e::ExprKind::CallPath(p, args).into()
+            e::ExprKind::CallPath(p, None, args).into()
         }
         else {
-            e::ExprKind::NamedValue(p).into()
+            e::ExprKind::NamedValue(p, None).into()
         })
     }
     Ok(match lex.peek_no_eof()?
@@ -400,8 +372,7 @@ fn parse_expr_value(lex: &mut super::Lexer) -> super::Result<e::Expr> {
         },
     Token::RWord(ReservedWord::Continue) => {
         lex.consume();
-        let v = parse_expr_opt(lex)?.map(Box::new);
-        e::ExprKind::Continue(v).into()
+        e::ExprKind::Continue.into()
         },
     Token::RWord(ReservedWord::Break) => {
         lex.consume();

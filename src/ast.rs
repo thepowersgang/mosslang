@@ -23,8 +23,22 @@ pub type AbiSpec = Option<Vec<u8>>;
 #[derive(Debug)]
 pub struct Pattern {
     pub span: crate::Span,
-    pub bindings: Vec<crate::Ident>,
+    pub bindings: Vec<PatternBinding>,
     pub ty: PatternTy,
+}
+pub struct PatternBinding {
+    pub name: crate::Ident,
+    pub index: Option<u32>,
+}
+impl ::std::fmt::Debug for PatternBinding {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(i) = self.index {
+            write!(f, "{}#{}", self.name, i)
+        }
+        else {
+            write!(f, "{}#?", self.name)
+        }
+    }
 }
 #[derive(Debug)]
 pub enum PatternTy {
@@ -63,8 +77,8 @@ pub fn visit_mut_expr(c: &mut dyn ExprVisitor, expr: &mut crate::ast::expr::Expr
     ExprKind::LiteralString(_)
     |ExprKind::LiteralInteger(_, _) => {},
 
+    ExprKind::Continue => {},
     ExprKind::Return(expr)
-    | ExprKind::Continue(expr)
     | ExprKind::Break(expr) => 
         if let Some(expr) = expr {
             c.visit_mut_expr(expr);
@@ -73,8 +87,8 @@ pub fn visit_mut_expr(c: &mut dyn ExprVisitor, expr: &mut crate::ast::expr::Expr
         c.visit_mut_expr(slot);
         c.visit_mut_expr(value);
     },
-    ExprKind::NamedValue(_path) => {},
-    ExprKind::CallPath(_path, exprs) => {
+    ExprKind::NamedValue(_path, _) => {},
+    ExprKind::CallPath(_path, _, exprs) => {
         for e in exprs {
             c.visit_mut_expr(e);
         }

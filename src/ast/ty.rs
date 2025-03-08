@@ -1,3 +1,4 @@
+#[derive(Clone, Debug)]
 pub struct Type
 {
     kind: TypeKind,
@@ -33,7 +34,7 @@ impl Type
     }
     pub fn new_array(inner: Type, count: crate::ast::ExprRoot) -> Self {
         Type {
-            kind: TypeKind::Array { inner: Box::new(inner), count: Box::new(count), }
+            kind: TypeKind::Array { inner: Box::new(inner), count: ArraySize::Unevaluated(Box::new(count)), }
         }
     }
     //pub fn new_slice(inner: Type) -> Self {
@@ -41,6 +42,7 @@ impl Type
     //}
 }
 
+#[derive(Clone,Debug)]
 pub enum IntClass {
     /// rust's usize
     PtrInt,
@@ -52,6 +54,21 @@ pub enum IntClass {
     Unsigned(u8),
 }
 
+#[derive(Debug)]
+enum ArraySize {
+    Unevaluated(Box<crate::ast::ExprRoot>),
+    Known(usize),
+}
+impl Clone for ArraySize {
+    fn clone(&self) -> Self {
+        match *self {
+        Self::Unevaluated(_) => todo!("Clone unevaluated array size"),
+        Self::Known(s) => Self::Known(s),
+        }
+    }
+}
+
+#[derive(Clone,Debug)]
 enum TypeKind
 {
     Infer {
@@ -66,6 +83,6 @@ enum TypeKind
     },
     Array {
         inner: Box<Type>,
-        count: Box<crate::ast::ExprRoot>,
+        count: ArraySize,
     }
 }
