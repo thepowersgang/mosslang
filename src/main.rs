@@ -5,6 +5,7 @@ use proc_macro2::Span;
 mod ast;
 mod parser;
 mod expand;
+mod typecheck;
 mod resolve;
 mod codegen;
 
@@ -40,7 +41,7 @@ fn main() {
     // 3. Flatten/simplify
     //let hir_crate = hir::from_ast(ast_crate);
     // 4. Typecheck and populate
-    //typecheck::check_crate(&mut hir_crate);
+    typecheck::typecheck(&mut ast_crate);
     // 5. Generate output
     let output_path = match args.output {
         Some(p) => p,

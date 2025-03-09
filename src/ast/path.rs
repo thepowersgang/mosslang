@@ -30,7 +30,7 @@ pub enum Root
     Root,
 }
 
-#[derive(Clone)]
+#[derive(Clone,PartialEq,Eq,Hash)]
 pub struct AbsolutePath(pub Vec<crate::Ident>);
 impl AbsolutePath {
     pub fn append(&self, v: crate::Ident) -> AbsolutePath {

@@ -1,7 +1,7 @@
 #[derive(Clone, Debug)]
 pub struct Type
 {
-    kind: TypeKind,
+    pub kind: TypeKind,
 }
 impl Type
 {
@@ -12,7 +12,7 @@ impl Type
     }
     pub fn new_infer() -> Self {
         Type {
-            kind: TypeKind::Infer { explicit: false },
+            kind: TypeKind::Infer { explicit: false, index: None },
         }
     }
     pub fn new_path(p: super::Path) -> Self {
@@ -24,6 +24,17 @@ impl Type
     pub fn new_tuple(inner: Vec<Type>) -> Self {
         Type {
             kind: TypeKind::Tuple(inner),
+        }
+    }
+    
+    pub fn new_bool() -> Self {
+        Type {
+            kind: TypeKind::Integer(IntClass::Unsigned(0)),
+        }
+    }
+    pub fn new_integer(cls: IntClass) -> Self {
+        Type {
+            kind: TypeKind::Integer(cls),
         }
     }
 
@@ -42,7 +53,7 @@ impl Type
     //}
 }
 
-#[derive(Clone,Debug)]
+#[derive(Copy,Clone,Debug,PartialEq)]
 pub enum IntClass {
     /// rust's usize
     PtrInt,
@@ -55,7 +66,7 @@ pub enum IntClass {
 }
 
 #[derive(Debug)]
-enum ArraySize {
+pub enum ArraySize {
     Unevaluated(Box<crate::ast::ExprRoot>),
     Known(usize),
 }
@@ -69,10 +80,11 @@ impl Clone for ArraySize {
 }
 
 #[derive(Clone,Debug)]
-enum TypeKind
+pub enum TypeKind
 {
     Infer {
         explicit: bool,
+        index: Option<usize>,
     },
     Integer(IntClass),
     Tuple(Vec<Type>),
