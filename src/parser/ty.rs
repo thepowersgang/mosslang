@@ -1,10 +1,31 @@
 use super::Result;
 use super::Lexer;
 use super::lex;
+use crate::ast::Type;
 
 pub fn parse_type(lex: &mut Lexer) -> Result<crate::ast::Type> {
     if let Some(p) = super::opt_parse_path(lex)? {
-        Ok( crate::ast::Type::new_path(p) )
+        if p.is_trivial() {
+            use crate::ast::ty::IntClass;
+            match p.components[0].to_string().as_str() {
+            "_" => return Ok(Type::new_infer()),
+            "u8"  => return Ok(Type::new_integer(IntClass::Unsigned(0))),
+            "u16" => return Ok(Type::new_integer(IntClass::Unsigned(1))),
+            "u32" => return Ok(Type::new_integer(IntClass::Unsigned(2))),
+            "u64" => return Ok(Type::new_integer(IntClass::Unsigned(3))),
+            "i8"  => return Ok(Type::new_integer(IntClass::Signed(0))),
+            "i16" => return Ok(Type::new_integer(IntClass::Signed(1))),
+            "i32" => return Ok(Type::new_integer(IntClass::Signed(2))),
+            "i64" => return Ok(Type::new_integer(IntClass::Signed(3))),
+
+            "usize" => return Ok(Type::new_integer(IntClass::PtrInt)),
+            "isize" => return Ok(Type::new_integer(IntClass::PtrDiff)),
+            "void" => return Ok(Type::new_void()),
+            "bool" => return Ok(Type::new_bool()),
+            _ => {},
+            }
+        }
+        Ok( Type::new_path(p) )
     }
     else {
         match lex.consume_no_eof()?
@@ -12,7 +33,7 @@ pub fn parse_type(lex: &mut Lexer) -> Result<crate::ast::Type> {
         // `(` - Tuple or grouping
         lex::Token::Punct(lex::Punct::ParenOpen) => {
             if lex.opt_consume_punct(lex::Punct::ParenClose)? {
-                Ok( crate::ast::Type::new_unit() )
+                Ok( Type::new_unit() )
             }
             else {
                 let inner = parse_type(lex)?;
@@ -28,7 +49,7 @@ pub fn parse_type(lex: &mut Lexer) -> Result<crate::ast::Type> {
                         v.push(parse_type(lex)?);
                     }
                     lex.consume_punct(lex::Punct::ParenClose)?;
-                    Ok( crate::ast::Type::new_tuple(v) )
+                    Ok( Type::new_tuple(v) )
                 }
             }
             },
@@ -39,11 +60,11 @@ pub fn parse_type(lex: &mut Lexer) -> Result<crate::ast::Type> {
             //if lex.opt_consume_punct(lex::Punct::Semicolon)? {
                 let count = super::expr::parse_root_expr(lex)?;
                 lex.consume_punct(lex::Punct::SquareClose)?;
-                Ok( crate::ast::Type::new_array(inner, count) )
+                Ok( Type::new_array(inner, count) )
             //}
             //else {
             //    lex.consume_punct(lex::Punct::SquareClose)?;
-            //    Ok( crate::ast::Type::new_slice(inner) )
+            //    Ok( Type::new_slice(inner) )
             //}
             },
         // '*' ['const'|'mut'] - Pointer
@@ -58,7 +79,7 @@ pub fn parse_type(lex: &mut Lexer) -> Result<crate::ast::Type> {
                     return Err(lex.unexpected());
                 };
             let inner = parse_type(lex)?;
-            Ok( crate::ast::Type::new_ptr(is_const, inner) )
+            Ok( Type::new_ptr(is_const, inner) )
             },
         t => todo!("parse_type - {:?}", t),
         }

@@ -268,7 +268,7 @@ fn parse_expr_trailing(lex: &mut super::Lexer) -> super::Result<e::Expr> {
             // Unnamed field - `(...).123`
             else if let &Token::Literal(super::lex::Literal::Integer(i, None)) = lex.peek_no_eof()? {
                 lex.consume();
-                v = e::ExprKind::FieldIndex(Box::new(v), i).into();
+                v = e::ExprKind::FieldIndex(Box::new(v), i as usize).into();
             }
             else {
                 todo!("parse_expr_trailing - unknown");

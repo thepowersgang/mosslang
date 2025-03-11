@@ -58,7 +58,7 @@ pub enum ExprKind
     //Struct(super::Path, Vec<Expr>),
 
     FieldNamed(Box<Expr>, crate::Ident),
-    FieldIndex(Box<Expr>, u128),
+    FieldIndex(Box<Expr>, usize),
     Index(Box<Expr>, Box<Expr>),
 
     Addr(bool, Box<Expr>),
@@ -135,19 +135,21 @@ impl<'a> ::core::fmt::Debug for ExprKind {
         ExprKind::Addr(_, expr) => todo!(),
         ExprKind::Deref(_) =>
             write!(f, "Deref(...)"),
-        ExprKind::Cast(expr, _) => todo!(),
+        ExprKind::Cast(_expr, ty) => 
+            write!(f, "Cast(... as {:?})", ty),
         ExprKind::UniOp(uni_op_ty, _expr) =>
             write!(f, "UniOp({:?}, ...)", uni_op_ty),
         ExprKind::BinOp(bin_op_ty, _expr_l, _expr_r) =>
             write!(f, "BinOp(... {:?} ...)", bin_op_ty),
-        ExprKind::CallValue(expr, exprs) => todo!(),
-        ExprKind::Loop { body } => todo!(),
-        ExprKind::WhileLoop { cond, body, else_block } => todo!(),
+        ExprKind::CallValue(_, exprs) => todo!(),
+        ExprKind::Loop { body: _ } => todo!(),
+        ExprKind::WhileLoop { cond: _, body: _, else_block } => todo!(),
         ExprKind::ForLoop { pattern, start: _, end: _, body: _, else_block } =>
             write!(f, "ForLoop({:?} in <a> .. <b> ... else {})", pattern, if else_block.is_none() { "() " } else { "..." }),
         ExprKind::IfChain { branches, else_block } =>
             write!(f, "IfChain(x{} else {})", branches.len(), if else_block.is_none() { "() " } else { "..." }),
-        ExprKind::Match { value, branches } => todo!(),
+        ExprKind::Match { value: _, branches } =>
+            write!(f, "Match({} branches)", branches.len()),
         }
     }
 }
@@ -184,7 +186,7 @@ pub enum BinOpTy
     BoolOr,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum UniOpTy
 {
     Invert,

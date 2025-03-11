@@ -125,6 +125,10 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
 
     {
         let mut es = EnumerateState { ivars: &mut ivars };
+        expr.variables.reserve(expr.variable_count);
+        for (_, t) in args {
+            expr.variables.push(t.clone());
+        }
         expr.variables.resize_with(expr.variable_count, || Type::new_infer());
         for t in &mut expr.variables {
             es.fill_ivars_in(t);
@@ -154,7 +158,8 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
                 }
             },
             TypeKind::Integer(_int_class) => {},
-            TypeKind::Named(_path) => {},
+            TypeKind::Named(_, _) => {},
+            TypeKind::Void => {},
 
             TypeKind::Tuple(items) => {
                 for t in items {
@@ -175,6 +180,9 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
             self.fill_ivars_in(&mut expr.data_ty);
             if let crate::ast::expr::ExprKind::LiteralInteger(_, crate::ast::expr::IntLitClass::Unspecified) = expr.kind {
                 //expr.data_ty.kind
+            }
+            else if let crate::ast::expr::ExprKind::Cast(_, ref mut ty) = expr.kind {
+                self.fill_ivars_in(ty);
             }
             crate::ast::visit_mut_expr(self, expr);
         }
@@ -281,6 +289,11 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
             use crate::ast::ty::TypeKind;
             match l {
             TypeKind::Infer { .. } => panic!(),
+            TypeKind::Void => if let TypeKind::Void = r {
+            }
+            else {
+                panic!("Type mismatch: {:?} != {:?}", l, r)
+            },
             TypeKind::Integer(ic_l) => if let TypeKind::Integer(ic_r) = r {
                 if ic_l != ic_r {
                     panic!("Type mismatch: {:?} != {:?}", l, r)
@@ -302,8 +315,8 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
             else {
                 panic!("Type mismatch: {:?} != {:?}", l, r)
             },
-            TypeKind::Named(path_l) => if let TypeKind::Named(path_r) = r {
-                if path_l.components != path_r.components {
+            TypeKind::Named(_, binding_l) => if let TypeKind::Named(_, binding_r) = r {
+                if binding_l != binding_r {
                     panic!("Type mismatch: {:?} != {:?}", l, r)
                 }
             }
@@ -319,8 +332,19 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
             else {
                 panic!("Type mismatch: {:?} != {:?}", l, r)
             },
-            TypeKind::Array { inner, count } => if let TypeKind::Array { inner: i_r, count: c_r } = r {
+            TypeKind::Array { inner, count: c_l } => if let TypeKind::Array { inner: i_r, count: c_r } = r {
                 self.equate_types(inner, i_r);
+                use crate::ast::ty::ArraySize;
+                match (c_l, c_r) {
+                (ArraySize::Unevaluated(se_l), ArraySize::Unevaluated(se_r)) => todo!(),
+                (ArraySize::Unevaluated(se_l), ArraySize::Known(s_r)) => todo!(),
+                (ArraySize::Known(s_l), ArraySize::Unevaluated(se_r)) => todo!(),
+                (ArraySize::Known(s_l), ArraySize::Known(s_r)) => {
+                    if s_l != s_r {
+                        panic!("Type mismatch: {:?} != {:?}", l, r)
+                    }
+                },
+                }
             }
             else {
                 panic!("Type mismatch: {:?} != {:?}", l, r)
@@ -363,7 +387,7 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
 
             // Loops need some special handling for `break`
             match &mut expr.kind {
-            ExprKind::ForLoop { pattern, start, end, body, else_block } => {
+            ExprKind::ForLoop { pattern: _, start, end, body, else_block } => {
                 self.visit_mut_expr(start);
                 self.visit_mut_expr(end);
                 self.loop_stack.push(expr.data_ty.clone());
@@ -391,6 +415,7 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
             _ => crate::ast::visit_mut_expr(self, expr),
             }
 
+            println!("{INDENT}visit_expr: {:?}", &expr.kind);
             use crate::ast::Type;
             use crate::ast::expr::ExprKind;
             match &mut expr.kind {
@@ -399,11 +424,11 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
                     self.equate_types(&expr.data_ty, &e.data_ty);
                 }
                 else {
-                    self.equate_types(&expr.data_ty, &Type::new_infer());
+                    self.equate_types(&expr.data_ty, &&Type::new_unit());
                 }
             },
             ExprKind::LiteralString(_) => {
-                self.equate_types(&expr.data_ty, &Type::new_ptr(true, Type::new_integer(crate::ast::ty::IntClass::Unsigned(0))));
+                self.equate_types(&expr.data_ty, &Type::new_ptr(true, Type::new_integer(crate::ast::ty::IntClass::Signed(0))));
             },
             ExprKind::LiteralInteger(_, int_lit_class) => {
                 self.equate_types(&expr.data_ty, &match int_lit_class {
@@ -461,7 +486,12 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
                     ValueBinding::StructValue(absolute_path) => todo!(),
                     ValueBinding::EnumVariant(absolute_path, _) => {
                         // TODO: If this is a data variant, then it should be a function pointer
-                        tmp_ty = Type::new_path(crate::ast::Path { root: crate::ast::path::Root::Root, components: absolute_path.0.clone() });
+                        let ap = AbsolutePath(absolute_path.0[..absolute_path.0.len()-1].to_owned());
+                        let mut enum_ty = Type::new_path(crate::ast::Path { root: crate::ast::path::Root::Root, components: ap.0.clone() });
+                        let crate::ast::ty::TypeKind::Named(_, ref mut binding) = enum_ty.kind else { panic!(); };
+                        *binding = Some(crate::ast::path::TypeBinding::Enum(ap));
+
+                        tmp_ty = enum_ty;
                         &tmp_ty
                     },
                     };
@@ -475,8 +505,8 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
                     let (ret_ty, arg_tys,is_variadic) = self.lc.functions.get(&absolute_path).unwrap();
                     self.equate_types(&expr.data_ty, ret_ty);
                     if *is_variadic {
-                        if arg_tys.len() < args.len() {
-                            panic!("Too few arguments to variadic function: {:?}", absolute_path)
+                        if arg_tys.len() > args.len() {
+                            panic!("Too few arguments to variadic function: {:?} (got {}, wanted {})", absolute_path, args.len(), arg_tys.len())
                         }
                     }
                     else {
@@ -484,8 +514,9 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
                             panic!("Wrong argument count to function: {:?}", absolute_path)
                         }
                     }
-                    for (a,b) in Iterator::zip(arg_tys.iter(), args.iter()) {
-                        self.equate_types(a, &b.data_ty);
+                    for (req_ty,arg_expr) in Iterator::zip(arg_tys.iter(), args.iter()) {
+                        println!("{:?}", req_ty);
+                        self.equate_types(req_ty, &arg_expr.data_ty);
                     }
                 },
                 ValueBinding::Static(absolute_path) => todo!(),
@@ -495,25 +526,44 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
                 }
             },
             ExprKind::Tuple(exprs) => todo!(),
-            ExprKind::FieldNamed(expr, ident) => todo!(),
-            ExprKind::FieldIndex(expr, _) => todo!(),
+            ExprKind::FieldNamed(expr_v, ident) => {
+                self.revisits.push((expr.data_ty.clone(), Revisit::FieldNamed(expr_v.data_ty.clone(), ident.clone()),));
+            },
+            ExprKind::FieldIndex(expr_v, idx) => {
+                self.revisits.push((expr.data_ty.clone(), Revisit::FieldIndex(expr_v.data_ty.clone(), *idx),));
+            },
             ExprKind::Index(expr_v, expr_i) => {
                 // Defer - this is a revisit
                 // - Although the index should be an integer?
                 self.revisits.push((expr.data_ty.clone(), Revisit::Index(expr_v.data_ty.clone(), expr_i.data_ty.clone()),));
             },
-            ExprKind::Addr(_, expr) => todo!(),
-            ExprKind::Deref(expr) => todo!(),
-            ExprKind::Cast(expr, _) => todo!(),
-            ExprKind::UniOp(uni_op_ty, expr) => todo!(),
+            ExprKind::Addr(_, expr) => todo!("addr"),
+            ExprKind::Deref(val_expr) => {
+                self.revisits.push((expr.data_ty.clone(), Revisit::Deref( val_expr.data_ty.clone()),));
+            },
+            ExprKind::Cast(expr_v, ty) => {
+                self.equate_types(&expr.data_ty, ty);
+            },
+            ExprKind::UniOp(uni_op_ty, val_expr) => {
+                self.equate_types(&expr.data_ty, &expr.data_ty);
+                self.revisits.push((expr.data_ty.clone(), Revisit::UniOp(*uni_op_ty, val_expr.data_ty.clone()),));
+            },
             ExprKind::BinOp(bin_op_ty, expr_l, expr_r) => {
-                //self.equate_types(l, r);
-                // TODO: Revisit?
                 self.revisits.push((expr.data_ty.clone(), Revisit::BinOp(expr_l.data_ty.clone(), *bin_op_ty, expr_r.data_ty.clone()),));
             },
             ExprKind::CallValue(expr, exprs) => todo!(),
-            ExprKind::Loop { body } => todo!(),
-            ExprKind::WhileLoop { cond, body, else_block } => todo!(),
+            ExprKind::Loop { body } => {
+                if let Some(res) = &body.result {
+                    self.equate_types(&Type::new_unit(), &res.data_ty);
+                }
+            },
+            ExprKind::WhileLoop { cond, body, else_block } => {
+                self.equate_types(&Type::new_bool(), &cond.data_ty);
+                if let Some(res) = &body.result {
+                    self.equate_types(&Type::new_unit(), &res.data_ty);
+                }
+                self.equate_opt_block(&expr.data_ty, &else_block);
+            },
             ExprKind::ForLoop { pattern, start, end, body, else_block } => {
                 self.pattern_assign(pattern, &start.data_ty);
                 self.equate_types(&start.data_ty, &end.data_ty);
@@ -540,7 +590,11 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
     }
 
     enum Revisit {
+        Deref(Type),
         Index(Type, Type),
+        FieldNamed(Type, crate::Ident),
+        FieldIndex(Type, usize),
         BinOp(Type, crate::ast::expr::BinOpTy, Type),
+        UniOp(crate::ast::expr::UniOpTy, Type),
     }
 }

@@ -5,6 +5,11 @@ pub struct Type
 }
 impl Type
 {
+    pub fn new_void() -> Self {
+        Type {
+            kind: TypeKind::Void,
+        }
+    }
     pub fn new_unit() -> Self {
         Type {
             kind: TypeKind::Tuple(vec![]),
@@ -17,7 +22,7 @@ impl Type
     }
     pub fn new_path(p: super::Path) -> Self {
         Type {
-            kind: TypeKind::Named(p),
+            kind: TypeKind::Named(p, None),
         }
     }
     
@@ -86,9 +91,10 @@ pub enum TypeKind
         explicit: bool,
         index: Option<usize>,
     },
+    Void,   // As opposed to unit, void cannot exist
     Integer(IntClass),
     Tuple(Vec<Type>),
-    Named(super::Path),
+    Named(super::Path, Option<super::path::TypeBinding>),
     Pointer {
         is_const: bool,
         inner: Box<Type>,

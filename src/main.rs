@@ -51,16 +51,14 @@ fn main() {
             p
             },
         };
-    codegen::generate(&output_path, ast_crate);
+    match codegen::generate(&output_path, ast_crate) {
+    Ok( () ) => {}
+    Err(e) => todo!("Handle error from codegen: {:?}", e),
+    }
 }
 
 mod indent {
     use ::std::sync::atomic::{AtomicUsize, Ordering};
-    macro_rules! inc {
-        ($indent:expr, $name:expr, $f:expr, $($a:tt)*) => {
-            $indent.inc_f($name, format_args!($f, $($a)*))
-        };
-    }
     pub struct Indent {
         v: ::std::sync::atomic::AtomicUsize,
     }

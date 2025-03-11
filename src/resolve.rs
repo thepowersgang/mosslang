@@ -4,12 +4,37 @@ use crate::ast::path::AbsolutePath;
 use std::collections::HashMap;
 use crate::INDENT;
 
+#[derive(Default)]
+struct LookupCache {
+    type_alises: HashMap<AbsolutePath, crate::ast::Type>,
+}
+
 pub fn resolve(ast_crate: &mut crate::ast::Crate)
 {
     println!("resolve");
-    resolve_mod(&mut ast_crate.module)
+
+    // Type aliases
+    let mut lc = LookupCache::default();
+    fill_lc(&mut lc, &ast_crate.module, AbsolutePath(Vec::new()));
+
+    resolve_mod(&lc, &mut ast_crate.module)
 }
-pub fn resolve_mod(module: &mut crate::ast::items::Module)
+
+fn fill_lc(lc: &mut LookupCache, module: &crate::ast::items::Module, path: AbsolutePath)
+{
+    for i in &module.items {
+        use crate::ast::items::ItemType;
+        match &i.ty {
+        //ItemType::Module(module) => fill_lc(lc, module),
+        ItemType::TypeAlias(ty) => {
+            lc.type_alises.insert(path.append(i.name.as_ref().unwrap().clone()), ty.clone());
+        },
+        _ => {},
+        }
+    }
+}
+
+fn resolve_mod(lc: &LookupCache, module: &mut crate::ast::items::Module)
 {
     let _i = INDENT.inc("resolve_mod");
     println!("{INDENT}resolve_mod: {} items", module.items.len());
@@ -20,13 +45,14 @@ pub fn resolve_mod(module: &mut crate::ast::items::Module)
             AbsolutePath(vec![name])
         };
         let mut item_scope = ItemScope {
+            lc,
             types: Default::default(),
             values: Default::default(),
         };
         for v in &module.items {
             use crate::ast::items::ItemType;
             match &v.ty {
-            //crate::ast::items::ItemType::Module(module) => expand_module(module),
+            //ItemType::Module(module) => resolve_mod(lc, module),
             ItemType::ExternBlock(eb) => {
                 for i in &eb.items {
                     match i.ty {
@@ -142,13 +168,69 @@ enum VariantInfo {
     Value,
     Type,
 }
-struct ItemScope {
+struct ItemScope<'a> {
+    lc: &'a LookupCache, 
     types: HashMap<crate::Ident, (crate::ast::path::TypeBinding, Option<HashMap<crate::Ident, (usize, VariantInfo,)>>,)>,
     values: HashMap<crate::Ident, crate::ast::path::ValueBinding>,
 }
 
+fn resolve_path_type(item_scope: &ItemScope, p: &crate::ast::Path) -> crate::ast::path::TypeBinding {
+    assert!(matches!(p.root, crate::ast::path::Root::None));
+    let c = p.components.first().expect("Empty path?");
+    if p.components.len() == 2 {
+        let vn = &p.components[1];
+        if let Some((ap, Some(variants))) = item_scope.types.get(c) {
+            let TypeBinding::Enum(ap) = ap else { unreachable!() };
+            if let Some((idx, VariantInfo::Value)) = variants.get(vn) {
+                return crate::ast::path::TypeBinding::EnumVariant(ap.append(vn.clone()), *idx)
+            }
+        }
+    }
+    if p.components.len() == 1 {
+        if let Some((v,_)) = item_scope.types.get(c) {
+            return v.clone();
+        }
+    }
+    todo!("Resolve type path {:?}", p);
+}
+
 fn resolve_type(item_scope: &ItemScope, ty: &mut crate::ast::Type)
 {
+    use crate::ast::ty::TypeKind;
+    match &mut ty.kind {
+    TypeKind::Infer { .. } => {},
+    TypeKind::Integer(..) => {},
+    TypeKind::Void => {},
+    TypeKind::Tuple(items) => {
+        for ty in items {
+            resolve_type(item_scope, ty);
+        }
+    },
+    TypeKind::Named(path, ref mut binding) => {
+        if binding.is_none() {
+            let r = resolve_path_type(item_scope, path);
+            if let TypeBinding::Alias(t) = r {
+                let a = item_scope.lc.type_alises.get(&t).expect("Missing TypeAlias");
+                *ty = a.clone();
+                // Recurse
+                resolve_type(item_scope, ty);
+            }
+            else {
+                *binding = Some(r);
+            }
+        }
+    },
+    TypeKind::Pointer { is_const: _, inner } => {
+        resolve_type(item_scope, inner);
+    },
+    TypeKind::Array { inner, count } => {
+        resolve_type(item_scope, inner);
+        match count {
+        crate::ast::ty::ArraySize::Unevaluated(expr_root) => todo!("ArraySize::Unevaluated"),
+        crate::ast::ty::ArraySize::Known(_) => {},
+        }
+    },
+    }
 }
 
 fn resolve_expr(item_scope: &ItemScope, expr: &mut crate::ast::ExprRoot, args: &mut [(crate::ast::Pattern, crate::ast::Type)])
@@ -174,7 +256,7 @@ fn resolve_expr(item_scope: &ItemScope, expr: &mut crate::ast::ExprRoot, args: &
         names: ::std::collections::HashMap<crate::Ident, u32>,
     }
     struct Context<'a> {
-        item_scope: &'a ItemScope,
+        item_scope: &'a ItemScope<'a>,
         next_index: u32,
         layers: Vec<ContextLayer>,
     }
@@ -266,11 +348,11 @@ fn resolve_expr(item_scope: &ItemScope, expr: &mut crate::ast::ExprRoot, args: &
             // Special case for blocks that generate scopes without being blocks
             match &mut expr.kind {
             ExprKind::Match { value, branches } => {
-                crate::ast::visit_mut_expr(self, value);
+                self.visit_mut_expr(value);
                 for a in branches {
                     self.layers.push(ContextLayer::default());
                     self.visit_mut_pattern(&mut a.pat, true);
-                    crate::ast::visit_mut_expr(self, &mut a.val);
+                    self.visit_mut_expr(&mut a.val);
                     self.layers.pop();
                 }
             }

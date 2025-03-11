@@ -60,7 +60,7 @@ pub enum ValueBinding
     StructValue(AbsolutePath),
     EnumVariant(AbsolutePath, usize)
 }
-#[derive(Clone,Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum TypeBinding
 {
     Alias(AbsolutePath),

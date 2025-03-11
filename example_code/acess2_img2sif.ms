@@ -117,9 +117,9 @@ extern "C" fn main(argc: usize, argv: *const *const c_char) -> i32 {
 	if comp == Compression::Auto
 	{
 		// Try encoding using a single RLE stream
-		let rle32length = CompressRLE1x32(0, buffer, pixel_count);
+		let rle32length = CompressRLE1x32(0, buffer as *const _, pixel_count);
 		// Try encoding using separate RLE streams for each channel
-		let rle4x8length = CompressRLE4x8(0, buffer, pixel_count);
+		let rle4x8length = CompressRLE4x8(0, buffer as *const _, pixel_count);
 		
 	//	printf("raw length = %i\n", pixel_count * 4);
 	//	printf("rle32length = %u\n", (unsigned int)rle32length);
