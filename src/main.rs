@@ -1,6 +1,5 @@
 
 use proc_macro2::Ident;
-use proc_macro2::Span;
 
 mod ast;
 mod parser;
@@ -8,6 +7,14 @@ mod expand;
 mod typecheck;
 mod resolve;
 mod codegen;
+
+#[derive(Debug,Copy,Clone)]
+struct Span(::proc_macro2::Span, ::proc_macro2::Span, );
+impl ::std::fmt::Display for Span {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}-{:?}: ", self.0, self.1)
+    }
+}
 
 #[derive(::gumdrop::Options)]
 struct Options

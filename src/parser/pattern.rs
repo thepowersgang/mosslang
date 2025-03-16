@@ -9,7 +9,7 @@ pub fn parse_pattern(lex: &mut Lexer) -> Result<crate::ast::Pattern> {
     parse_pattern_inner(lex, Vec::new())
 }
 fn parse_pattern_inner(lex: &mut Lexer, mut bindings: Vec<PatternBinding>) -> Result<crate::ast::Pattern> {
-    let span = lex.cur_span();
+    let ps = lex.start_span();
     Ok(if let Some(p) = super::opt_parse_path(lex)? {
         if p.is_trivial() {
             if lex.opt_consume_punct(lex::Punct::At)? {
@@ -30,8 +30,8 @@ fn parse_pattern_inner(lex: &mut Lexer, mut bindings: Vec<PatternBinding>) -> Re
         else {
             match p.into_trivial()
             {
-            Ok(i) => Pattern { span, bindings, ty: PatternTy::MaybeBind(i) },
-            Err(p) => Pattern { span, bindings, ty: PatternTy::NamedValue(p, None) },
+            Ok(i) => Pattern { span: lex.end_span(ps), bindings, ty: PatternTy::MaybeBind(i) },
+            Err(p) => Pattern { span: lex.end_span(ps), bindings, ty: PatternTy::NamedValue(p, None) },
             }
         }
     }
@@ -48,7 +48,7 @@ fn parse_pattern_inner(lex: &mut Lexer, mut bindings: Vec<PatternBinding>) -> Re
             }
         }
         Pattern {
-            span,
+            span: lex.end_span(ps),
             bindings,
             ty: PatternTy::Tuple(pats),
         }
@@ -59,7 +59,7 @@ fn parse_pattern_inner(lex: &mut Lexer, mut bindings: Vec<PatternBinding>) -> Re
             return parse_pattern_inner(lex, bindings);
         }
         else {
-            Pattern { span, bindings, ty: PatternTy::Any }
+            Pattern { span: lex.end_span(ps), bindings, ty: PatternTy::Any }
         }
     }
     else {

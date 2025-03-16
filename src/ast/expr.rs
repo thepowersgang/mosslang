@@ -28,12 +28,13 @@ pub enum IntLitClass {
 }
 #[derive(Debug)]
 pub struct Expr {
+    pub span: crate::Span,
     pub kind: ExprKind,
     pub data_ty: super::Type,
 }
-impl From<ExprKind> for Expr {
-    fn from(value: ExprKind) -> Self {
-        Expr { kind: value, data_ty: crate::ast::Type::new_infer() }
+impl ExprKind {
+    pub fn to_expr(self, span: crate::Span) -> Expr {
+        Expr { span, kind: self, data_ty: crate::ast::Type::new_infer() }
     }
 }
 pub enum ExprKind
@@ -119,6 +120,13 @@ impl<'a> ::core::fmt::Debug for ExprKind {
                 f.write_str("..., ")?;
             }
             f.write_str(")")
+            },
+        ExprKind::CallValue(_val, exprs) => {
+            write!(f, "CallValue( (...)( ")?;
+            for _ in exprs { 
+                f.write_str("..., ")?;
+            }
+            f.write_str(") )")
             }
         ExprKind::Tuple(exprs) => {
             f.write_str("( ")?;
@@ -132,7 +140,7 @@ impl<'a> ::core::fmt::Debug for ExprKind {
         ExprKind::FieldIndex(_value, _idx) => todo!(),
         ExprKind::Index(_expr_v, _expr_i) =>
             write!(f, "Index(..., ...)"),
-        ExprKind::Addr(is_mut, expr) => 
+        ExprKind::Addr(is_mut, _expr) => 
             write!(f, "Addr({}, ...)", if *is_mut { "mut" } else { "const" }),
         ExprKind::Deref(_) =>
             write!(f, "Deref(...)"),
@@ -142,7 +150,6 @@ impl<'a> ::core::fmt::Debug for ExprKind {
             write!(f, "UniOp({:?}, ...)", uni_op_ty),
         ExprKind::BinOp(bin_op_ty, _expr_l, _expr_r) =>
             write!(f, "BinOp(... {:?} ...)", bin_op_ty),
-        ExprKind::CallValue(_, exprs) => todo!(),
         ExprKind::Loop { body: _ } => todo!(),
         ExprKind::WhileLoop { cond: _, body: _, else_block } => 
             write!(f, "WhileLoop( ... else {})", if else_block.is_none() { "() " } else { "..." }),

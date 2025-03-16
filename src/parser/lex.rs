@@ -3,16 +3,20 @@
 //! This wraps `proc_macro2`'s lexer, as the idea is to use the same sort of language design
 use ::proc_macro2::TokenTree;
 
+#[derive(Copy,Clone)]
+pub struct ProtoSpan(::proc_macro2::Span);
+
 pub struct Lexer {
     inner_iter: ::proc_macro2::token_stream::IntoIter,
     stack: Vec<StackEnt>,
-    cur: Option<(crate::Span,Token,)>,
+    cur: Option<(::proc_macro2::Span,Token,)>,
+    last_span: Option<::proc_macro2::Span>,
     flags: u32,
     pushback_stack: Vec<TokenTree>,
 }
 struct StackEnt {
     iter: ::proc_macro2::token_stream::IntoIter,
-    close: Option<(Punct,crate::Span,)>,
+    close: Option<(Punct,::proc_macro2::Span,)>,
 }
 impl Lexer {
     /// Create a lexer from a file
@@ -29,6 +33,7 @@ impl Lexer {
             inner_iter: lexed.into_iter(),
             stack: Default::default(),
             cur: None,
+            last_span: None,
             flags: 0,
             pushback_stack: Vec::new(),
         };
@@ -36,12 +41,18 @@ impl Lexer {
         Ok(rv)
     }
 
-    pub fn cur_span(&self) -> crate::Span {
-        self.cur.as_ref().unwrap().0
+    pub fn start_span(&self) -> ProtoSpan {
+        ProtoSpan(self.cur.as_ref().unwrap().0)
+    }
+    pub fn end_span(&self, ps: ProtoSpan) -> crate::Span {
+        crate::Span(ps.0, *self.last_span.as_ref().unwrap())
     }
 
     /// Advance the iner state of the lexer
-    fn advance(&mut self) -> Option<(crate::Span, Token)> {
+    fn advance(&mut self) -> Option<(::proc_macro2::Span, Token)> {
+        if let Some((span,_)) = &self.cur {
+            self.last_span = Some(*span);
+        }
         let rv = self.advance_inner();
         println!("advance: {:?}", rv);
         rv
@@ -63,7 +74,7 @@ impl Lexer {
     }
 
     /// Inner implementation of `advance` (before printing)
-    fn advance_inner(&mut self) -> Option<(crate::Span,Token)> {
+    fn advance_inner(&mut self) -> Option<(::proc_macro2::Span,Token)> {
         // Loop, recursing into `TokenTree`s
         loop {
             let tt = loop {
@@ -180,12 +191,19 @@ impl Lexer {
     pub fn consume(&mut self) -> Option<Token> {
         let rv = self.cur.take();
         self.cur = self.advance();
-        rv.map(|v| v.1)
+        match rv {
+        Some((span, tok)) => {
+            self.last_span = Some(span);
+            Some(tok)
+            },
+        None => None,
+        }
     }
     /// Consume the current token, returning an error if EOF is seen
     pub fn consume_no_eof(&mut self) -> super::Result<Token> {
         match self.cur.take() {
-        Some((_, v)) => {
+        Some((span, v)) => {
+            self.last_span = Some(span);
             self.cur = self.advance();
             Ok(v)
             },

@@ -5,10 +5,11 @@ use crate::INDENT;
 
 /// Parse the root of an expression - expecting a block
 pub fn parse_root_block(lex: &mut super::Lexer) -> super::Result<crate::ast::ExprRoot> {
+    let ps = lex.start_span();
     lex.consume_punct(Punct::BraceOpen)?;
     let b = parse_block(lex)?;
     Ok(crate::ast::ExprRoot {
-        e: e::ExprKind::Block(b).into(),
+        e: e::ExprKind::Block(b).to_expr(lex.end_span(ps)),
         variable_count: 0,
         variables: Default::default(),
     })
@@ -114,15 +115,17 @@ fn parse_expr_nostruct(lex: &mut super::Lexer) -> super::Result<e::Expr> {
 macro_rules! def_left_assoc {
     ($name:ident, $next:ident, $v1:ident, $v2:ident => { $( $p:ident => $e:expr ),* }) => {
         fn $name(lex: &mut super::Lexer) -> super::Result<e::Expr> {
+            //#[allow(dead_code)]
             #[allow(unused_mut)]
             let mut $v1 = $next(lex)?;
             loop {
+                let _ps = lex.start_span();
                 match lex.peek_no_eof()?
                 {
                 $( Token::Punct(Punct::$p) => {
                     lex.consume();
                     let $v2 = $next(lex)?;
-                    $v1 = $e
+                    $v1 = $e.to_expr(lex.end_span(_ps));
                     }),*
                 _ => break,
                 }
@@ -143,25 +146,26 @@ macro_rules! def_binops {
     };
     ( @inner $name:ident,$next:ident { $($p:ident => $op:ident),* } ) => {
         def_left_assoc!{$name, $next, v1,v2 => {
-            $( $p  => e::ExprKind::BinOp(e::BinOpTy::$op, Box::new(v1), Box::new(v2)).into() ),*
+            $( $p  => e::ExprKind::BinOp(e::BinOpTy::$op, Box::new(v1), Box::new(v2)) ),*
         }}
     };
 }
 // - Assignment
 fn parse_expr_assign(lex: &mut super::Lexer) -> super::Result<e::Expr> {
+    let ps = lex.start_span();
     let lhs = parse_binops_root(lex)?;
-    fn op_equals(lex: &mut super::Lexer, lhs: e::Expr, op: Option<()>) -> super::Result<e::Expr> {
+    fn op_equals(lex: &mut super::Lexer, ps: super::lex::ProtoSpan, lhs: e::Expr, op: Option<()>) -> super::Result<e::Expr> {
         lex.consume();
         Ok(e::ExprKind::Assign {
             slot: Box::new(lhs),
             op,
             value: Box::new(parse_binops_root(lex)?),
-        }.into())
+        }.to_expr(lex.end_span(ps)))
     }
     match lex.peek_no_eof()? {
-    Token::Punct(Punct::Equals) => op_equals(lex, lhs, None),
-    Token::Punct(Punct::PlusEquals) => op_equals(lex, lhs, Some(())),
-    Token::Punct(Punct::MinusEquals) => op_equals(lex, lhs, Some(())),
+    Token::Punct(Punct::Equals) => op_equals(lex, ps, lhs, None),
+    Token::Punct(Punct::PlusEquals) => op_equals(lex, ps, lhs, Some(())),
+    Token::Punct(Punct::MinusEquals) => op_equals(lex, ps, lhs, Some(())),
     _ => Ok(lhs),
     }
 }
@@ -197,11 +201,12 @@ def_binops!{
 }
 // - Cast (can't use the binop code, as `as` is reserved word not a punctuation... and the rhs is a type)
 fn parse_expr_cast(lex: &mut super::Lexer) -> super::Result<e::Expr> {
+    let ps: super::lex::ProtoSpan = lex.start_span();
     let mut v = parse_expr_leading(lex)?;
     loop {
         if lex.opt_consume_rword(ReservedWord::As)? {
             let ty = super::parse_type(lex)?;
-            v = e::Expr { kind: e::ExprKind::Cast(Box::new(v), ty), data_ty: crate::ast::Type::new_infer() };
+            v = e::Expr { span: lex.end_span(ps), kind: e::ExprKind::Cast(Box::new(v), ty), data_ty: crate::ast::Type::new_infer() };
         }
         else {
             break;
@@ -213,17 +218,18 @@ fn parse_expr_cast(lex: &mut super::Lexer) -> super::Result<e::Expr> {
 /// 
 /// Leading deref, negate, and invert
 fn parse_expr_leading(lex: &mut super::Lexer) -> super::Result<e::Expr> {
+    let ps = lex.start_span();
     Ok(if lex.opt_consume_punct(Punct::Star)? {
-        e::ExprKind::Deref(Box::new(parse_expr_leading(lex)?)).into()
+        e::ExprKind::Deref(Box::new(parse_expr_leading(lex)?)).to_expr(lex.end_span(ps))
     }
     else if lex.opt_consume_punct(Punct::Amp)? {
-        e::ExprKind::Addr(lex.opt_consume_rword(ReservedWord::Mut)?, Box::new(parse_expr_leading(lex)?)).into()
+        e::ExprKind::Addr(lex.opt_consume_rword(ReservedWord::Mut)?, Box::new(parse_expr_leading(lex)?)).to_expr(lex.end_span(ps))
     }
     else if lex.opt_consume_punct(Punct::Bang)? {
-        e::ExprKind::UniOp(e::UniOpTy::Invert, Box::new(parse_expr_leading(lex)?)).into()
+        e::ExprKind::UniOp(e::UniOpTy::Invert, Box::new(parse_expr_leading(lex)?)).to_expr(lex.end_span(ps))
     }
     else if lex.opt_consume_punct(Punct::Minus)? {
-        e::ExprKind::UniOp(e::UniOpTy::Negate, Box::new(parse_expr_leading(lex)?)).into()
+        e::ExprKind::UniOp(e::UniOpTy::Negate, Box::new(parse_expr_leading(lex)?)).to_expr(lex.end_span(ps))
     }
     else {
         parse_expr_trailing(lex)?
@@ -232,6 +238,7 @@ fn parse_expr_leading(lex: &mut super::Lexer) -> super::Result<e::Expr> {
 /// Trailing unaries (call, index, field)
 fn parse_expr_trailing(lex: &mut super::Lexer) -> super::Result<e::Expr> {
     //let _i = INDENT.inc("parse_expr_trailing");
+    let ps = lex.start_span();
     let mut v = parse_expr_value(lex)?;
     loop {
         // Function call (value) - `(...)(...)`
@@ -246,29 +253,29 @@ fn parse_expr_trailing(lex: &mut super::Lexer) -> super::Result<e::Expr> {
                     break;
                 }
             }
-            v = e::ExprKind::CallValue(Box::new(v), args).into();
+            v = e::ExprKind::CallValue(Box::new(v), args).to_expr(lex.end_span(ps));
         }
         // indexing - `(...)[...]`
         else if lex.opt_consume_punct(Punct::SquareOpen)? {
             let i = parse_expr(lex)?;
             lex.consume_punct(Punct::SquareClose)?;
-            v = e::ExprKind::Index(Box::new(v), Box::new(i)).into();
+            v = e::ExprKind::Index(Box::new(v), Box::new(i)).to_expr(lex.end_span(ps));
         }
         // Field access/trailing-deref
         else if lex.opt_consume_punct(Punct::Dot)? {
             // Trailing deref - `(...).*`
             if lex.opt_consume_punct(Punct::Star)? {
                 // Trailing deref
-                v = e::ExprKind::Deref(Box::new(v)).into();
+                v = e::ExprKind::Deref(Box::new(v)).to_expr(lex.end_span(ps));
             }
             // Named field - `(...).fieldname`
             else if let Some(i) = lex.opt_consume_ident()? {
-                v = e::ExprKind::FieldNamed(Box::new(v), i).into();
+                v = e::ExprKind::FieldNamed(Box::new(v), i).to_expr(lex.end_span(ps));
             }
             // Unnamed field - `(...).123`
             else if let &Token::Literal(super::lex::Literal::Integer(i, None)) = lex.peek_no_eof()? {
                 lex.consume();
-                v = e::ExprKind::FieldIndex(Box::new(v), i as usize).into();
+                v = e::ExprKind::FieldIndex(Box::new(v), i as usize).to_expr(lex.end_span(ps));
             }
             else {
                 todo!("parse_expr_trailing - unknown");
@@ -295,6 +302,7 @@ fn parse_expr_opt(lex: &mut super::Lexer) -> super::Result<Option<e::Expr>> {
 
 /// Bottom level values
 fn parse_expr_value(lex: &mut super::Lexer) -> super::Result<e::Expr> {
+    let ps = lex.start_span();
     if let Some(p) = super::opt_parse_path(lex)? {
         return Ok(if !lex.has_flag(super::lex::Flag::NoStructLiteral) && lex.opt_consume_punct(Punct::BraceOpen)? {
             todo!("parse_expr_value - struct literal")
@@ -311,10 +319,10 @@ fn parse_expr_value(lex: &mut super::Lexer) -> super::Result<e::Expr> {
                 }
             }
             println!("{:?}", lex.peek());
-            e::ExprKind::CallPath(p, None, args).into()
+            e::ExprKind::CallPath(p, None, args).to_expr(lex.end_span(ps))
         }
         else {
-            e::ExprKind::NamedValue(p, None).into()
+            e::ExprKind::NamedValue(p, None).to_expr(lex.end_span(ps))
         })
     }
     Ok(match lex.peek_no_eof()?
@@ -337,7 +345,7 @@ fn parse_expr_value(lex: &mut super::Lexer) -> super::Result<e::Expr> {
             Some(super::lex::IntClass::U64) => e::IntLitClass::Integer(crate::ast::ty::IntClass::Unsigned(4)),
         }),
         _ => todo!("parse_expr_value - {:?}", lit),
-        }.into()
+        }.to_expr(lex.end_span(ps))
         },
     Token::Punct(Punct::ParenOpen) => {
         lex.consume();
@@ -355,7 +363,7 @@ fn parse_expr_value(lex: &mut super::Lexer) -> super::Result<e::Expr> {
                 }
             }
             lex.consume_punct(Punct::ParenClose)?;
-            e::ExprKind::Tuple(items).into()
+            e::ExprKind::Tuple(items).to_expr(lex.end_span(ps))
         }
         else {
             lex.consume_punct(Punct::ParenClose)?;
@@ -364,21 +372,21 @@ fn parse_expr_value(lex: &mut super::Lexer) -> super::Result<e::Expr> {
         },
     Token::Punct(Punct::BraceOpen) => {
         lex.consume();
-        e::ExprKind::Block(parse_block(lex)?).into()
+        e::ExprKind::Block(parse_block(lex)?).to_expr(lex.end_span(ps))
         },
     Token::RWord(ReservedWord::Return) => {
         lex.consume();
         let v = parse_expr_opt(lex)?.map(Box::new);
-        e::ExprKind::Return(v).into()
+        e::ExprKind::Return(v).to_expr(lex.end_span(ps))
         },
     Token::RWord(ReservedWord::Continue) => {
         lex.consume();
-        e::ExprKind::Continue.into()
+        e::ExprKind::Continue.to_expr(lex.end_span(ps))
         },
     Token::RWord(ReservedWord::Break) => {
         lex.consume();
         let v = parse_expr_opt(lex)?.map(Box::new);
-        e::ExprKind::Break(v).into()
+        e::ExprKind::Break(v).to_expr(lex.end_span(ps))
         },
     // --- loops ---
     // `loop { ... }`
@@ -386,7 +394,7 @@ fn parse_expr_value(lex: &mut super::Lexer) -> super::Result<e::Expr> {
         lex.consume();
         lex.consume_punct(Punct::BraceOpen)?;
         let body = parse_block(lex)?;
-        e::ExprKind::Loop { body }.into()
+        e::ExprKind::Loop { body }.to_expr(lex.end_span(ps))
         },
     // `for v in start .. end { ... } [else { ... }]`
     Token::RWord(ReservedWord::For) => {
@@ -411,7 +419,7 @@ fn parse_expr_value(lex: &mut super::Lexer) -> super::Result<e::Expr> {
             end,
             body,
             else_block,
-            }.into()
+            }.to_expr(lex.end_span(ps))
         },
     // `while cond { ... } [else { ... }`
     Token::RWord(ReservedWord::While) => {
@@ -430,7 +438,7 @@ fn parse_expr_value(lex: &mut super::Lexer) -> super::Result<e::Expr> {
             cond,
             body,
             else_block
-        }.into()
+        }.to_expr(lex.end_span(ps))
         },
     // --- coditionals ---
     // `if cond { ... } [else if cond { ... }] [else { ... }]`
@@ -455,7 +463,7 @@ fn parse_expr_value(lex: &mut super::Lexer) -> super::Result<e::Expr> {
         e::ExprKind::IfChain {
             branches,
             else_block: fallback,
-            }.into()
+            }.to_expr(lex.end_span(ps))
         },
     // `match value { ... }`
     Token::RWord(ReservedWord::Match) => {
@@ -486,7 +494,7 @@ fn parse_expr_value(lex: &mut super::Lexer) -> super::Result<e::Expr> {
         e::ExprKind::Match {
             value,
             branches,
-            }.into()
+            }.to_expr(lex.end_span(ps))
         },
     t => todo!("parse_expr_value - {:?}", t),
     })
