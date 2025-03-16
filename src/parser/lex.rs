@@ -134,6 +134,15 @@ impl Lexer {
                     },
                 ::litrs::Literal::Byte(b) => Literal::Integer(b.value() as _, Some(IntClass::U8)),
                 ::litrs::Literal::Char(b) => Literal::Integer(b.value() as _, Some(IntClass::U8)),
+                ::litrs::Literal::Float(v) => {
+                    let cls = match v.suffix() {
+                        "f32" => Some(FloatClass::F32),
+                        "f64" => Some(FloatClass::F64),
+                        s => todo!("Float suffix {:?}", s),
+                        };
+                    let v: f64 = v.number_part().parse().unwrap();
+                    Literal::Float(v, cls)
+                    }
                 l => todo!("Handle literal - {:?}", l),
                 }
                 }),)),

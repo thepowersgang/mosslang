@@ -329,22 +329,24 @@ fn parse_expr_value(lex: &mut super::Lexer) -> super::Result<e::Expr> {
     {
     Token::Literal(_) => {
         let Token::Literal(lit) = lex.consume().unwrap() else { unreachable!() };
+        use crate::ast::ty::IntClass;
         match lit
         {
         super::lex::Literal::String(v) => e::ExprKind::LiteralString(v),
         super::lex::Literal::Integer(v, cls) => e::ExprKind::LiteralInteger(v, match cls {
             None => e::IntLitClass::Unspecified,
             Some(super::lex::IntClass::Pointer) => e::IntLitClass::Pointer,
-            Some(super::lex::IntClass::I8 ) => e::IntLitClass::Integer(crate::ast::ty::IntClass::Signed(0)),
-            Some(super::lex::IntClass::I16) => e::IntLitClass::Integer(crate::ast::ty::IntClass::Signed(1)),
-            Some(super::lex::IntClass::I32) => e::IntLitClass::Integer(crate::ast::ty::IntClass::Signed(2)),
-            Some(super::lex::IntClass::I64) => e::IntLitClass::Integer(crate::ast::ty::IntClass::Signed(4)),
-            Some(super::lex::IntClass::U8 ) => e::IntLitClass::Integer(crate::ast::ty::IntClass::Unsigned(0)),
-            Some(super::lex::IntClass::U16) => e::IntLitClass::Integer(crate::ast::ty::IntClass::Unsigned(1)),
-            Some(super::lex::IntClass::U32) => e::IntLitClass::Integer(crate::ast::ty::IntClass::Unsigned(2)),
-            Some(super::lex::IntClass::U64) => e::IntLitClass::Integer(crate::ast::ty::IntClass::Unsigned(4)),
+            Some(super::lex::IntClass::I8 ) => e::IntLitClass::Integer(IntClass::Signed(0)),
+            Some(super::lex::IntClass::I16) => e::IntLitClass::Integer(IntClass::Signed(1)),
+            Some(super::lex::IntClass::I32) => e::IntLitClass::Integer(IntClass::Signed(2)),
+            Some(super::lex::IntClass::I64) => e::IntLitClass::Integer(IntClass::Signed(4)),
+            Some(super::lex::IntClass::U8 ) => e::IntLitClass::Integer(IntClass::Unsigned(0)),
+            Some(super::lex::IntClass::U16) => e::IntLitClass::Integer(IntClass::Unsigned(1)),
+            Some(super::lex::IntClass::U32) => e::IntLitClass::Integer(IntClass::Unsigned(2)),
+            Some(super::lex::IntClass::U64) => e::IntLitClass::Integer(IntClass::Unsigned(4)),
         }),
-        _ => todo!("parse_expr_value - {:?}", lit),
+        super::lex::Literal::Bool(v) => e::ExprKind::LiteralInteger(v as u128, e::IntLitClass::Integer(IntClass::Unsigned(0))),
+        super::lex::Literal::Float(v, cls) => todo!("Float literal: {:?} {:?}", v, cls),
         }.to_expr(lex.end_span(ps))
         },
     Token::Punct(Punct::ParenOpen) => {
