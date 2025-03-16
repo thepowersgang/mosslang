@@ -68,7 +68,7 @@ impl ::std::fmt::Debug for PatternBinding {
 pub enum PatternTy {
     Any,
     MaybeBind(crate::Ident),
-    NamedValue(Path),
+    NamedValue(Path, Option<path::ValueBinding>),
     Tuple(Vec<Pattern>),
 }
 

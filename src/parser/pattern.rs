@@ -31,7 +31,7 @@ fn parse_pattern_inner(lex: &mut Lexer, mut bindings: Vec<PatternBinding>) -> Re
             match p.into_trivial()
             {
             Ok(i) => Pattern { span, bindings, ty: PatternTy::MaybeBind(i) },
-            Err(p) => Pattern { span, bindings, ty: PatternTy::NamedValue(p) },
+            Err(p) => Pattern { span, bindings, ty: PatternTy::NamedValue(p, None) },
             }
         }
     }

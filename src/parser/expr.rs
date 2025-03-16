@@ -326,6 +326,7 @@ fn parse_expr_value(lex: &mut super::Lexer) -> super::Result<e::Expr> {
         super::lex::Literal::String(v) => e::ExprKind::LiteralString(v),
         super::lex::Literal::Integer(v, cls) => e::ExprKind::LiteralInteger(v, match cls {
             None => e::IntLitClass::Unspecified,
+            Some(super::lex::IntClass::Pointer) => e::IntLitClass::Pointer,
             Some(super::lex::IntClass::I8 ) => e::IntLitClass::Integer(crate::ast::ty::IntClass::Signed(0)),
             Some(super::lex::IntClass::I16) => e::IntLitClass::Integer(crate::ast::ty::IntClass::Signed(1)),
             Some(super::lex::IntClass::I32) => e::IntLitClass::Integer(crate::ast::ty::IntClass::Signed(2)),

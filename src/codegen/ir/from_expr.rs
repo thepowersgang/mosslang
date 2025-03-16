@@ -390,7 +390,7 @@ impl<'a> Visitor<'a> {
         match &pattern.ty {
         PatternTy::Any => {},
         PatternTy::MaybeBind(_) => unreachable!("Should have been resolved"),
-        PatternTy::NamedValue(_) => {},
+        PatternTy::NamedValue(_, _binding) => {},
         PatternTy::Tuple(patterns) => {
             for (i,sp) in patterns.iter().enumerate() {
                 self.destructure_pattern(sp, value.field(i));

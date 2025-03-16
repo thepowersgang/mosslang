@@ -112,6 +112,7 @@ impl Lexer {
                 ::litrs::Literal::Integer(i) => {
                     let cls = match i.suffix() {
                         "" => None,
+                        "p" => Some(IntClass::Pointer),
                         "i8"  => Some(IntClass::I8 ), "u8"  => Some(IntClass::U8),
                         "i16" => Some(IntClass::I16), "u16" => Some(IntClass::U16),
                         "i32" => Some(IntClass::I32), "u32" => Some(IntClass::U32),
@@ -468,6 +469,7 @@ pub enum FloatClass {
 }
 #[derive(Debug)]
 pub enum IntClass {
+    Pointer,
     I8, I16, I32, I64,
     U8, U16, U32, U64,
 }

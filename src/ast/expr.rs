@@ -132,7 +132,8 @@ impl<'a> ::core::fmt::Debug for ExprKind {
         ExprKind::FieldIndex(_value, _idx) => todo!(),
         ExprKind::Index(_expr_v, _expr_i) =>
             write!(f, "Index(..., ...)"),
-        ExprKind::Addr(_, expr) => todo!(),
+        ExprKind::Addr(is_mut, expr) => 
+            write!(f, "Addr({}, ...)", if *is_mut { "mut" } else { "const" }),
         ExprKind::Deref(_) =>
             write!(f, "Deref(...)"),
         ExprKind::Cast(_expr, ty) => 
@@ -143,7 +144,8 @@ impl<'a> ::core::fmt::Debug for ExprKind {
             write!(f, "BinOp(... {:?} ...)", bin_op_ty),
         ExprKind::CallValue(_, exprs) => todo!(),
         ExprKind::Loop { body: _ } => todo!(),
-        ExprKind::WhileLoop { cond: _, body: _, else_block } => todo!(),
+        ExprKind::WhileLoop { cond: _, body: _, else_block } => 
+            write!(f, "WhileLoop( ... else {})", if else_block.is_none() { "() " } else { "..." }),
         ExprKind::ForLoop { pattern, start: _, end: _, body: _, else_block } =>
             write!(f, "ForLoop({:?} in <a> .. <b> ... else {})", pattern, if else_block.is_none() { "() " } else { "..." }),
         ExprKind::IfChain { branches, else_block } =>

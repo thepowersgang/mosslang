@@ -28,7 +28,7 @@ extern {
 	fn fopen(path: *const c_char, mode: *const c_char) -> FILE;
 	fn fclose(file: FILE);
 	fn fprintf(file: FILE, s: *const c_char, ...) -> i32;
-    fn fwrite(data: *mut (), count: usize, size: usize, fp: FILE);
+    fn fwrite(data: *const (), count: usize, size: usize, fp: FILE);
 
 	fn strcmp(s1: *const c_char, s2: *const c_char) -> i32;
 	fn memcmp(s1: *const (), s2: *const (), count: usize) -> i32;
@@ -141,20 +141,20 @@ extern "C" fn main(argc: usize, argv: *const *const c_char) -> i32 {
             (pixel_count*4, buffer)
             },
         Compression::Rle1x32 => {
-            let mut bufLen = CompressRLE1x32(NULL, buffer, pixel_count);
+            let mut bufLen = CompressRLE1x32(0p, buffer as *const _,  pixel_count);
             let buffer2 = malloc(bufLen);
-            bufLen = CompressRLE1x32(buffer2, buffer, pixel_count);
+            bufLen = CompressRLE1x32(buffer2 as *mut _, buffer as *const _, pixel_count);
             (bufLen, buffer2)
             },
         Compression::Rle4x8 => {
-            let mut bufLen = CompressRLE4x8(NULL, buffer, pixel_count);
+            let mut bufLen = CompressRLE4x8(0p, buffer as *const _, pixel_count);
             let buffer2 = malloc(bufLen);
-            bufLen = CompressRLE4x8(buffer2, buffer, pixel_count);
+            bufLen = CompressRLE4x8(buffer2 as *mut _, buffer as *const _, pixel_count);
             (bufLen, buffer2)
             }
         _ => {
             fprintf(stderr, "Unknown compresion %i\n", comp);
-            return 2;
+            return 2
             }
         };
     
@@ -166,12 +166,12 @@ extern "C" fn main(argc: usize, argv: *const *const c_char) -> i32 {
         return -1;
     }
 
-    fwrite(&0x51F0u16, 2, 1, fp);
-    fwrite(&(comp as u16), 2, 1, fp);
-    fwrite(&(w as u16), 2, 1, fp);
-    fwrite(&(h as u16), 2, 1, fp);
+    fwrite(&0x51F0u16 as *const _, 2, 1, fp);
+    fwrite(&(comp as u16) as *const _, 2, 1, fp);
+    fwrite(&(w as u16) as *const _, 2, 1, fp);
+    fwrite(&(h as u16) as *const _, 2, 1, fp);
 
-	fwrite(out_buffer, out_length, 1, fp);
+	fwrite(out_buffer as *const _, out_length, 1, fp);
 
 	free(out_buffer);
 	fclose(fp);
@@ -182,15 +182,15 @@ extern "C" fn main(argc: usize, argv: *const *const c_char) -> i32 {
 
 fn CompressRLE1x32(Dest: *mut void, Src: *const void, Size: usize) -> usize
 {
-	RLE1_7(Dest, Src, Size, 4, 4, 2)
+	RLE1_7(Dest as *mut _, Src as *const _, Size, 4, 4, 2)
 }
 fn CompressRLE4x8(Dest: *mut void, Src: *const void, Size: usize) -> usize
 {
 	let ret = 0;
-	ret += RLE1_7(if Dest { Dest + ret } else { 0 }, Src+0, Size, 1, 4, 3);
-	ret += RLE1_7(if Dest { Dest + ret } else { 0 }, Src+1, Size, 1, 4, 3);
-	ret += RLE1_7(if Dest { Dest + ret } else { 0 }, Src+2, Size, 1, 4, 3);
-	ret += RLE1_7(if Dest { Dest + ret } else { 0 }, Src+3, Size, 1, 4, 3);
+	ret += RLE1_7(if Dest != 0p { Dest as *mut u8 + ret } else { 0p }, Src as *const u8 + 0, Size, 1, 4, 3);
+	ret += RLE1_7(if Dest != 0p { Dest as *mut u8 + ret } else { 0p }, Src as *const u8 + 1, Size, 1, 4, 3);
+	ret += RLE1_7(if Dest != 0p { Dest as *mut u8 + ret } else { 0p }, Src as *const u8 + 2, Size, 1, 4, 3);
+	ret += RLE1_7(if Dest != 0p { Dest as *mut u8 + ret } else { 0p }, Src as *const u8 + 3, Size, 1, 4, 3);
 	return ret;
 }
 
@@ -214,7 +214,7 @@ const USE_VERBATIM: bool = true;
  * other data that you may not want to RLE together (for example, different
  * colour channels in an image).
  */
-fn RLE1_7(dest: *mut u8, src: *const u8, Size: usize, BlockSize: i32, BlockStep: i32, MinRunLength: i32) -> usize
+fn RLE1_7(dest: *mut u8, src: *const u8, Size: usize, BlockSize: usize, BlockStep: usize, MinRunLength: usize) -> usize
 {
 	let mut ret = 0;
 	let mut nVerb = 0;
@@ -277,7 +277,7 @@ fn RLE1_7(dest: *mut u8, src: *const u8, Size: usize, BlockSize: i32, BlockStep:
 				// Data
 				for k in 0 .. runlen
 				{
-					memcpy( &dest[ret], &src[(i+k)*BlockStep], BlockSize );
+					memcpy( &mut dest[ret], &src[(i+k)*BlockStep], BlockSize );
 					ret += BlockSize;
 				}
 			}
@@ -289,10 +289,10 @@ fn RLE1_7(dest: *mut u8, src: *const u8, Size: usize, BlockSize: i32, BlockStep:
 		}
 		// RLE Range
 		else {
-			if dest {
+			if dest != 0p {
 				dest[ret] = runlen;	// Length (with high bit unset)
                 ret += 1;
-				memcpy(&dest[ret], &src[i*BlockStep], BlockSize);
+				memcpy(&mut dest[ret], &src[i*BlockStep], BlockSize);
 				ret += BlockSize;
 			}
 			else {

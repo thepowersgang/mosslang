@@ -310,11 +310,11 @@ fn resolve_expr(item_scope: &ItemScope, expr: &mut crate::ast::ExprRoot, args: &
             PatternTy::MaybeBind(ident) => {
                 if refutable {
                     // TODO: look up globals
-                    if let Some(_v) = self.item_scope.values.get(ident) {
+                    if let Some(v) = self.item_scope.values.get(ident) {
                         p.ty = PatternTy::NamedValue(crate::ast::Path {
                             root: crate::ast::path::Root::None,
                             components: vec![ident.clone()],
-                        });
+                        }, Some(v.clone()));
                         return ;
                     }
                 }
@@ -324,7 +324,9 @@ fn resolve_expr(item_scope: &ItemScope, expr: &mut crate::ast::ExprRoot, args: &
                     });
                 p.ty = PatternTy::Any;
             },
-            PatternTy::NamedValue(_) => {},
+            PatternTy::NamedValue(path, binding) => {
+                *binding = Some(self.resolve_path_value(path));
+            },
             PatternTy::Tuple(patterns) => {
                 for p in patterns {
                     self.visit_mut_pattern(p, refutable);
