@@ -442,7 +442,21 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
         }
     
         fn visit_mut_block(&mut self, block: &mut crate::ast::expr::Block) {
-            crate::ast::visit_mut_block(self, block);
+            for s in &mut block.statements {
+                match s {
+                crate::ast::expr::Statement::Expr(e) => self.visit_mut_expr(e),
+                crate::ast::expr::Statement::Let(pattern, ty, expr) => {
+                    self.visit_mut_pattern(pattern, false);
+                    self.fill_ivars_in(ty);
+                    if let Some(expr) = expr {
+                        self.visit_mut_expr(expr);
+                    }
+                },
+                }
+            }
+            if let Some(expr) = &mut block.result {
+                self.visit_mut_expr(expr);
+            }
         }
     }
 
@@ -735,7 +749,21 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
         }
     
         fn visit_mut_block(&mut self, block: &mut crate::ast::expr::Block) {
-            crate::ast::visit_mut_block(self, block);
+            for s in &mut block.statements {
+                match s {
+                crate::ast::expr::Statement::Expr(e) => self.visit_mut_expr(e),
+                crate::ast::expr::Statement::Let(pattern, ty, expr) => {
+                    self.visit_mut_pattern(pattern, false);
+                    if let Some(expr) = expr {
+                        self.visit_mut_expr(expr);
+                        self.equate_types(&expr.span, ty, &expr.data_ty);
+                    }
+                },
+                }
+            }
+            if let Some(expr) = &mut block.result {
+                self.visit_mut_expr(expr);
+            }
         }
     }
 
