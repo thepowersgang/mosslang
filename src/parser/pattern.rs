@@ -30,8 +30,8 @@ fn parse_pattern_inner(lex: &mut Lexer, mut bindings: Vec<PatternBinding>) -> Re
         else {
             match p.into_trivial()
             {
-            Ok(i) => Pattern { span: lex.end_span(ps), bindings, ty: PatternTy::MaybeBind(i) },
-            Err(p) => Pattern { span: lex.end_span(ps), bindings, ty: PatternTy::NamedValue(p, None) },
+            Ok(i) => Pattern { span: lex.end_span(&ps), bindings, ty: PatternTy::MaybeBind(i) },
+            Err(p) => Pattern { span: lex.end_span(&ps), bindings, ty: PatternTy::NamedValue(p, None) },
             }
         }
     }
@@ -48,7 +48,7 @@ fn parse_pattern_inner(lex: &mut Lexer, mut bindings: Vec<PatternBinding>) -> Re
             }
         }
         Pattern {
-            span: lex.end_span(ps),
+            span: lex.end_span(&ps),
             bindings,
             ty: PatternTy::Tuple(pats),
         }
@@ -59,7 +59,7 @@ fn parse_pattern_inner(lex: &mut Lexer, mut bindings: Vec<PatternBinding>) -> Re
             return parse_pattern_inner(lex, bindings);
         }
         else {
-            Pattern { span: lex.end_span(ps), bindings, ty: PatternTy::Any }
+            Pattern { span: lex.end_span(&ps), bindings, ty: PatternTy::Any }
         }
     }
     else {

@@ -669,32 +669,32 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
                 self.equate_types(&expr.span, &expr.data_ty, &ty);
             },
             ExprKind::FieldNamed(expr_v, ident) => {
-                self.revisits.push((expr.span, expr.data_ty.clone(), Revisit::FieldNamed(expr_v.data_ty.clone(), ident.clone()),));
+                self.revisits.push((expr.span.clone(), expr.data_ty.clone(), Revisit::FieldNamed(expr_v.data_ty.clone(), ident.clone()),));
             },
             ExprKind::FieldIndex(expr_v, idx) => {
-                self.revisits.push((expr.span, expr.data_ty.clone(), Revisit::FieldIndex(expr_v.data_ty.clone(), *idx),));
+                self.revisits.push((expr.span.clone(), expr.data_ty.clone(), Revisit::FieldIndex(expr_v.data_ty.clone(), *idx),));
             },
             ExprKind::Index(expr_v, expr_i) => {
                 // Defer - this is a revisit
                 // - Although the index should be an integer?
-                self.revisits.push((expr.span, expr.data_ty.clone(), Revisit::Index(expr_v.data_ty.clone(), expr_i.data_ty.clone()),));
+                self.revisits.push((expr.span.clone(), expr.data_ty.clone(), Revisit::Index(expr_v.data_ty.clone(), expr_i.data_ty.clone()),));
             },
             ExprKind::Addr(is_mut, expr_v) => {
                 let ty = Type::new_ptr( !*is_mut, expr_v.data_ty.clone() );
                 self.equate_types(&expr.span, &expr.data_ty, &ty);
             },
             ExprKind::Deref(val_expr) => {
-                self.revisits.push((expr.span, expr.data_ty.clone(), Revisit::Deref( val_expr.data_ty.clone()),));
+                self.revisits.push((expr.span.clone(), expr.data_ty.clone(), Revisit::Deref( val_expr.data_ty.clone()),));
             },
             ExprKind::Cast(expr_v, ty) => {
                 self.equate_types(&expr.span, &expr.data_ty, ty);
             },
             ExprKind::UniOp(uni_op_ty, val_expr) => {
                 self.equate_types(&expr.span, &expr.data_ty, &expr.data_ty);
-                self.revisits.push((expr.span, expr.data_ty.clone(), Revisit::UniOp(*uni_op_ty, val_expr.data_ty.clone()),));
+                self.revisits.push((expr.span.clone(), expr.data_ty.clone(), Revisit::UniOp(*uni_op_ty, val_expr.data_ty.clone()),));
             },
             ExprKind::BinOp(bin_op_ty, expr_l, expr_r) => {
-                self.revisits.push((expr.span, expr.data_ty.clone(), Revisit::BinOp(expr_l.data_ty.clone(), *bin_op_ty, expr_r.data_ty.clone()),));
+                self.revisits.push((expr.span.clone(), expr.data_ty.clone(), Revisit::BinOp(expr_l.data_ty.clone(), *bin_op_ty, expr_r.data_ty.clone()),));
             },
             ExprKind::CallValue(expr, exprs) => todo!("CallValue"),
             ExprKind::Loop { body } => {

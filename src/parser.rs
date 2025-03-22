@@ -2,7 +2,7 @@
 //! 
 use crate::ast::items::{self,Item,ItemType};
 
-mod lex;
+pub mod lex;
 mod expr;
 mod pattern;
 mod ty;
@@ -126,7 +126,7 @@ fn parse_module(lex: &mut Lexer, mod_attrs: &mut Vec<crate::ast::Attribute>) -> 
                     attributes,
                 });
                 },
-            _ => todo!("other extern?"),
+            t => todo!("{}: other extern? {:?}", lex.start_span(), t),
             }
         },
 
@@ -178,7 +178,7 @@ fn parse_module(lex: &mut Lexer, mod_attrs: &mut Vec<crate::ast::Attribute>) -> 
                 attributes,
             });
             },
-        t => todo!("parse error: expected reserved word, got {:?}", t),
+        t => todo!("{}: parse error: expected reserved word, got {:?}", lex.start_span(), t),
         }
     }
     Ok(rv)
@@ -337,7 +337,7 @@ fn parse_extern_block(lex: &mut Lexer, abi: crate::ast::AbiSpec, mut outer_attrs
                 ty: crate::ast::items::ExternItemType::Static(items::ExternStatic { ty }),
                 });
             },
-        _ => todo!("extern block: unexpected"),
+        t => todo!("{}: extern block: unexpected token {:?}", lex.start_span(), t),
         }
     }
     Ok(crate::ast::items::ExternBlock {
