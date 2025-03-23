@@ -1,7 +1,7 @@
 use crate::INDENT;
 use crate::ast::path::AbsolutePath;
 use crate::ast::path::ValueBinding;
-use crate::ast::Type;
+use crate::ast::{Type,ty::TypeKind};
 
 #[derive(Default)]
 struct LookupContext {
@@ -146,7 +146,7 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
     crate::ast::visit_mut_expr(&mut ss, &mut expr.e);
 
     fn get_ivar<'a>(ivars: &'a [Type], mut ty: &'a Type) -> &'a Type {
-        while let crate::ast::ty::TypeKind::Infer { index, .. } = ty.kind {
+        while let TypeKind::Infer { index, .. } = ty.kind {
             ty = &ivars[index.unwrap()];
         }
         ty
@@ -156,7 +156,6 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
         let n = revisits.len();
         revisits.retain(|(span, ty, op)| {
             println!("{INDENT}revisit {ty:?} = {op:?}");
-            use crate::ast::ty::TypeKind;
             enum R {
                 Keep,
                 Consume,
@@ -170,7 +169,7 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
                     equate_types(span, &mut ivars, ty, &inner);
                     R::Consume
                 }
-                _ => panic!("Type error: Deref on unsupported type {:?}", inner_ty),
+                _ => panic!("{span}: Type error: Deref on unsupported type {:?}", inner_ty),
                 },
             Revisit::Index(val_ty, index_ty) => match &get_ivar(&ivars, val_ty).kind {
                 TypeKind::Infer { .. } => R::Keep,
@@ -182,7 +181,7 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
                     //equate_types(&mut ivars, &Type::new_integer(crate::ast::ty::IntClass::PtrInt), index_ty);
                     R::Consume
                 }
-                _ => panic!("Type error: Index on unsupported type {:?}", val_ty),
+                _ => panic!("{span}: Type error: Index on unsupported type {:?}", val_ty),
                 },
             Revisit::FieldNamed(_, ident) => todo!("field named"),
             Revisit::FieldIndex(_, _) => todo!("field index"),
@@ -232,16 +231,76 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
                 },
                 }
                 },
-            Revisit::UniOp(uni_op_ty, _) => todo!(),
+            Revisit::UniOp(uni_op_ty, in_ty) => {
+                match uni_op_ty
+                {
+                crate::ast::expr::UniOpTy::Invert => {
+                    equate_types(span, &mut ivars, ty, in_ty);
+                    R::Consume
+                },
+                crate::ast::expr::UniOpTy::Negate => {
+                    equate_types(span, &mut ivars, ty, in_ty);
+                    R::Consume
+                },
+                }
+            },
             }, R::Keep)
         });
         assert!(revisits.len() < n);
     }
     
+    struct FmtWithIvars<'a>(&'a [Type],&'a Type);
+    impl<'a> ::std::fmt::Display for FmtWithIvars<'a> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            let mut ty = self.1;
+            while let TypeKind::Infer { index, .. } = ty.kind {
+                ty = &self.0[index.unwrap()];
+            }
+            match &ty.kind {
+            TypeKind::Tuple(items) => {
+                f.write_str("(")?;
+                for inner in items {
+                    FmtWithIvars(self.0, inner).fmt(f)?;
+                    f.write_str(", ")?;
+                }
+                f.write_str(")")
+            },
+            TypeKind::Pointer { is_const, inner } => {
+                if *is_const {
+                    f.write_str("*const ")?;
+                }
+                else {
+                    f.write_str("*mut ")?;
+                }
+                FmtWithIvars(self.0, inner).fmt(f)
+            },
+            TypeKind::Array { inner, count } => {
+                f.write_str("[")?;
+                FmtWithIvars(self.0, inner).fmt(f)?;
+                f.write_str("; ")?;
+                match count {
+                crate::ast::ty::ArraySize::Unevaluated(_) => todo!(),
+                crate::ast::ty::ArraySize::Known(v) => write!(f, "{}", v)?,
+                }
+                f.write_str("]")
+            },
+            _ => ty.fmt(f),
+            }
+        }
+    }
     fn equate_types(span: &crate::Span, ivars: &mut [Type], l: &Type, r: &Type)
     {
+        match equate_types_inner(ivars, l, r)
+        {
+        Ok(_) => {},
+        Err((l_i, r_i)) => {
+            panic!("{span}: Type mismatch - {l_i:?} != {r_i:?}\n- {l}\n- {r}", l_i=l_i, l=FmtWithIvars(ivars,l), r=FmtWithIvars(ivars,r));
+        }
+        }
+    }
+    fn equate_types_inner(ivars: &mut [Type], l: &Type, r: &Type) -> Result<(),(TypeKind,TypeKind)>
+    {
         let _i = INDENT.inc_f("equate_types", format_args!("{:?},{:?}", l, r));
-        use crate::ast::ty::TypeKind;
         match (&l.kind, &r.kind) {
         (TypeKind::Infer { index: i1, .. }, TypeKind::Infer { index: i2, .. }) => {
             let mut i1 = i1.expect("Unspecified ivar");
@@ -257,7 +316,7 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
                 i2 = i;
             }
             if i1 == i2 {
-                return ;
+                return Ok(());
             }
             let (t1,t2) = if i1 < i2 {
                     let (a,b) = ivars.split_at_mut(i2);
@@ -272,23 +331,26 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
                 if let TypeKind::Infer { index: None, .. } = t2.kind {
                     println!("{INDENT}equate_types(): IVar #{i1} = @#{i2}");
                     *idx = Some(i2);
+                    Ok(())
                 }
                 else {
                     // Shouldn't be an infer, so we can just assign into `t1`
                     println!("{INDENT}equate_types(): IVar #{i1} = {:?}", t2);
                     *t1 = t2.clone();
+                    Ok(())
                 }
             }
             else {
                 if let TypeKind::Infer { index: None, .. } = t2.kind {
                     println!("{INDENT}equate_types(): IVar #{i2} = {:?}", t1);
                     *t2 = t1.clone();
+                    Ok(())
                 }
                 else {
                     // Check the types are equal
                     let t1 = t1.kind.clone();
                     let t2 = t2.kind.clone();
-                    equate_types_inner(span, ivars, &t1, &t2)
+                    equate_type_kind(ivars, &t1, &t2)
                 }
             }
             },
@@ -301,10 +363,11 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
             println!("{INDENT}equate_types(i-c): #{} {:?} = {:?}", i1, t1, r);
             if let TypeKind::Infer { index: None, .. } = t1.kind {
                 *t1 = r.clone();
+                Ok(())
             }
             else {
                 let v = t1.kind.clone();
-                equate_types_inner(span, ivars, &v, &r.kind)
+                equate_type_kind(ivars, &v, &r.kind)
             }
         },
         (_, TypeKind::Infer { index, .. }) => {
@@ -316,64 +379,45 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
             println!("{INDENT}equate_types(c-i): {:?} = #{} {:?}", l, i2, t2);
             if let TypeKind::Infer { index: None, .. } = t2.kind {
                 *t2 = l.clone();
+                Ok( () )
             }
             else {
                 let v = t2.kind.clone();
-                equate_types_inner(span, ivars, &l.kind, &v)
+                equate_type_kind(ivars, &l.kind, &v)
             }
         },
-        _ => equate_types_inner(span, ivars, &l.kind, &r.kind),
+        _ => equate_type_kind(ivars, &l.kind, &r.kind),
         }
     }
-    fn equate_types_inner(span: &crate::Span, ivars: &mut [Type], l: &crate::ast::ty::TypeKind, r: &crate::ast::ty::TypeKind) {
-        use crate::ast::ty::TypeKind;
-        match l {
-        TypeKind::Infer { .. } => panic!(),
-        TypeKind::Void => if let TypeKind::Void = r {
-        }
-        else {
-            panic!("{span}Type mismatch: {:?} != {:?}", l, r)
-        },
-        TypeKind::Integer(ic_l) => if let TypeKind::Integer(ic_r) = r {
-            if ic_l != ic_r {
-                panic!("{span}Type mismatch: {:?} != {:?}", l, r)
-            } else {
-                // Allowed
-            }
-        }
-        else {
-            panic!("{span}Type mismatch: {:?} != {:?}", l, r)
-        },
-        TypeKind::Tuple(inner_l) => if let TypeKind::Tuple(inner_r) = r {
+    fn equate_type_kind(ivars: &mut [Type], l: &TypeKind, r: &TypeKind) -> Result<(),(TypeKind,TypeKind)>
+    {
+        match (l,r) {
+        (TypeKind::Infer { .. }, _) => panic!(),
+        (TypeKind::Void, TypeKind::Void) => Ok( () ),
+        (TypeKind::Integer(ic_l), TypeKind::Integer(ic_r)) if ic_l == ic_r => Ok(()),
+        (TypeKind::Tuple(inner_l), TypeKind::Tuple(inner_r)) => {
             if inner_l.len() != inner_r.len() {
-                panic!("{span}Type mismatch: {:?} != {:?}", l, r)
+                return Err((l.clone(),r.clone()));
             }
             for (l,r) in Iterator::zip(inner_l.iter(), inner_r.iter()) {
-                equate_types(span, ivars, l, r);
+                equate_types_inner(ivars, l, r)?;
             }
-        }
-        else {
-            panic!("{span}Type mismatch: {:?} != {:?}", l, r)
+            Ok(())
         },
-        TypeKind::Named(_, binding_l) => if let TypeKind::Named(_, binding_r) = r {
+        (TypeKind::Named(_, binding_l), TypeKind::Named(_, binding_r)) => {
             if binding_l != binding_r {
-                panic!("{span}Type mismatch: {:?} != {:?}", l, r)
+                return Err((l.clone(),r.clone()));
             }
-        }
-        else {
-            panic!("{span}Type mismatch: {:?} != {:?}", l, r)
+            Ok( () )
         },
-        TypeKind::Pointer { is_const, inner } => if let TypeKind::Pointer { is_const: ic_r, inner: i_r } = r {
+        (TypeKind::Pointer { is_const, inner }, TypeKind::Pointer { is_const: ic_r, inner: i_r }) => {
             if *is_const != *ic_r {
-                panic!("{span}Type mismatch: {:?} != {:?}", l, r)
+                return Err((l.clone(),r.clone()));
             }
-            equate_types(span, ivars, inner, i_r);
-        }
-        else {
-            panic!("{span}Type mismatch: {:?} != {:?}", l, r)
+            equate_types_inner(ivars, inner, i_r)
         },
-        TypeKind::Array { inner, count: c_l } => if let TypeKind::Array { inner: i_r, count: c_r } = r {
-            equate_types(span, ivars, inner, i_r);
+        (TypeKind::Array { inner: i_l, count: c_l }, TypeKind::Array { inner: i_r, count: c_r }) => {
+            equate_types_inner(ivars, i_l, i_r)?;
             use crate::ast::ty::ArraySize;
             match (c_l, c_r) {
             (ArraySize::Unevaluated(se_l), ArraySize::Unevaluated(se_r)) => todo!(),
@@ -381,14 +425,13 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
             (ArraySize::Known(s_l), ArraySize::Unevaluated(se_r)) => todo!(),
             (ArraySize::Known(s_l), ArraySize::Known(s_r)) => {
                 if s_l != s_r {
-                    panic!("{span}Type mismatch: {:?} != {:?}", l, r)
+                    return Err((l.clone(),r.clone()));
                 }
             },
             }
-        }
-        else {
-            panic!("{span}Type mismatch: {:?} != {:?}", l, r)
+            Ok( () )
         },
+        _ => Err((l.clone(),r.clone())),
         }
     }
 
@@ -397,7 +440,6 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
     }
     impl<'a> EnumerateState<'a> {
         fn fill_ivars_in(&mut self, ty: &mut crate::ast::Type) {
-            use crate::ast::ty::TypeKind;
             match &mut ty.kind {
             TypeKind::Infer { explicit: _, index } => {
                 if index.is_none() {
@@ -491,7 +533,7 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
                         // TODO: If this is a data variant, then it should be a function pointer
                         let ap = AbsolutePath(absolute_path.0[..absolute_path.0.len()-1].to_owned());
                         let mut enum_ty = Type::new_path(crate::ast::Path { root: crate::ast::path::Root::Root, components: ap.0.clone() });
-                        let crate::ast::ty::TypeKind::Named(_, ref mut binding) = enum_ty.kind else { panic!(); };
+                        let TypeKind::Named(_, ref mut binding) = enum_ty.kind else { panic!(); };
                         *binding = Some(crate::ast::path::TypeBinding::Enum(ap));
 
                         tmp_ty = enum_ty;
@@ -641,7 +683,7 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
                         // TODO: If this is a data variant, then it should be a function pointer
                         let ap = AbsolutePath(absolute_path.0[..absolute_path.0.len()-1].to_owned());
                         let mut enum_ty = Type::new_path(crate::ast::Path { root: crate::ast::path::Root::Root, components: ap.0.clone() });
-                        let crate::ast::ty::TypeKind::Named(_, ref mut binding) = enum_ty.kind else { panic!(); };
+                        let TypeKind::Named(_, ref mut binding) = enum_ty.kind else { panic!(); };
                         *binding = Some(crate::ast::path::TypeBinding::Enum(ap));
 
                         tmp_ty = enum_ty;
