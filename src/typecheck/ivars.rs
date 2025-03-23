@@ -160,7 +160,11 @@ fn equate_type_kind(ivars: &mut [Type], l: &TypeKind, r: &TypeKind) -> Result<()
     match (l,r) {
     (TypeKind::Infer { .. }, _) => panic!(),
     (TypeKind::Void, TypeKind::Void) => Ok( () ),
+    (TypeKind::Void, _) => Err((l.clone(),r.clone())),
+    (TypeKind::Bool, TypeKind::Bool) => Ok( () ),
+    (TypeKind::Bool, _) => Err((l.clone(),r.clone())),
     (TypeKind::Integer(ic_l), TypeKind::Integer(ic_r)) if ic_l == ic_r => Ok(()),
+    (TypeKind::Integer { .. }, _) => Err((l.clone(),r.clone())),
     (TypeKind::Tuple(inner_l), TypeKind::Tuple(inner_r)) => {
         if inner_l.len() != inner_r.len() {
             return Err((l.clone(),r.clone()));
@@ -170,18 +174,21 @@ fn equate_type_kind(ivars: &mut [Type], l: &TypeKind, r: &TypeKind) -> Result<()
         }
         Ok(())
     },
+    (TypeKind::Tuple { .. }, _) => Err((l.clone(),r.clone())),
     (TypeKind::Named(_, binding_l), TypeKind::Named(_, binding_r)) => {
         if binding_l != binding_r {
             return Err((l.clone(),r.clone()));
         }
         Ok( () )
     },
+    (TypeKind::Named { .. }, _) => Err((l.clone(),r.clone())),
     (TypeKind::Pointer { is_const, inner }, TypeKind::Pointer { is_const: ic_r, inner: i_r }) => {
         if *is_const != *ic_r {
             return Err((l.clone(),r.clone()));
         }
         equate_types_inner(ivars, inner, i_r)
     },
+    (TypeKind::Pointer { .. }, _) => Err((l.clone(),r.clone())),
     (TypeKind::Array { inner: i_l, count: c_l }, TypeKind::Array { inner: i_r, count: c_r }) => {
         equate_types_inner(ivars, i_l, i_r)?;
         use crate::ast::ty::ArraySize;
@@ -197,6 +204,6 @@ fn equate_type_kind(ivars: &mut [Type], l: &TypeKind, r: &TypeKind) -> Result<()
         }
         Ok( () )
     },
-    _ => Err((l.clone(),r.clone())),
+    (TypeKind::Array { .. }, _) => Err((l.clone(),r.clone())),
     }
 }

@@ -35,7 +35,7 @@ impl Type
     
     pub fn new_bool() -> Self {
         Type {
-            kind: TypeKind::Integer(IntClass::Unsigned(0)),
+            kind: TypeKind::Bool,
         }
     }
     pub fn new_integer(cls: IntClass) -> Self {
@@ -74,6 +74,7 @@ impl Type
             InferKind::Float => f.write_str("f"),
             }
         },
+        TypeKind::Bool => f.write_str("bool"),
         TypeKind::Void => f.write_str("void"),
         TypeKind::Integer(int_class) => match int_class
             {
@@ -198,6 +199,7 @@ pub enum TypeKind
         index: Option<usize>,
     },
     Void,   // As opposed to unit, void cannot exist
+    Bool,
     Integer(IntClass),
     Tuple(Vec<Type>),
     Named(super::Path, Option<super::path::TypeBinding>),

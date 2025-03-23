@@ -201,6 +201,7 @@ fn resolve_type(item_scope: &ItemScope, ty: &mut crate::ast::Type)
     TypeKind::Infer { .. } => {},
     TypeKind::Integer(..) => {},
     TypeKind::Void => {},
+    TypeKind::Bool => {},
     TypeKind::Tuple(items) => {
         for ty in items {
             resolve_type(item_scope, ty);

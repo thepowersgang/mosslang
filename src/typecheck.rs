@@ -248,10 +248,16 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
                             ir.coerce_to(*idx, inner_dst.clone());
                             R::Keep
                         },
+                        // Void is special, it can coerce to/from anything
                         (TypeKind::Void, _) => R::Consume,
+                        // TODO: Wait, is coercing from `void` good? It's what C does, but is it a good idea?
+                        // Answer: Nope. Let's force explicit casts
+                        // Except, `NULL` is `*mut void` allowing it to coerce everywhere
+                        // - Should probably make a `nullptr_t` type instead
                         (_, TypeKind::Void) => R::Consume,
                         _ => {
                             // Equate the inners, as the constness may have changed
+                            // TODO: For better error messages, create a suitable type using the LHS's constness
                             let i_l = (**i_l).clone();
                             let i_r = (**i_r).clone();
                             equate_types(span, &mut ivars, &i_l, &i_r);
