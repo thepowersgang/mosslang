@@ -1,4 +1,4 @@
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Type
 {
     pub kind: TypeKind,
@@ -56,6 +56,82 @@ impl Type
     //pub fn new_slice(inner: Type) -> Self {
     //    Type {}
     //}
+
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>, is_debug: bool) -> std::fmt::Result {
+        match &self.kind {
+        TypeKind::Infer { explicit, index } => {
+            f.write_str(if *explicit { "_" } else { "" })?;
+            if let Some(index) = index {
+                write!(f, "#{}", index)
+            }
+            else {
+                write!(f, "#?")
+            }
+        },
+        TypeKind::Void => f.write_str("void"),
+        TypeKind::Integer(int_class) => match int_class
+            {
+            IntClass::PtrInt => f.write_str("isize"),
+            IntClass::PtrDiff => f.write_str("usize"),
+            IntClass::Signed(shift) => write!(f, "i{}", 8 << *shift),
+            IntClass::Unsigned(shift) => write!(f, "u{}", 8 << *shift),
+            },
+        TypeKind::Tuple(items) => {
+            f.write_str("( ")?;
+            for t in items {
+                t.fmt(f, is_debug)?;
+                f.write_str(", ")?;
+            }
+            f.write_str(")")
+        },
+        TypeKind::Named(path, type_binding) => {
+            if let Some(tb) = type_binding {
+                use super::path::TypeBinding;
+                let (t, path) = match tb {
+                    TypeBinding::Alias(absolute_path) => ("alias", absolute_path),
+                    TypeBinding::Union(absolute_path) => ("union", absolute_path),
+                    TypeBinding::Struct(absolute_path) => ("struct", absolute_path),
+                    TypeBinding::Enum(absolute_path) => ("enum", absolute_path),
+                    TypeBinding::EnumVariant(absolute_path, _) => ("variant", absolute_path),
+                    };
+                if is_debug {
+                    write!(f, "{}/*{}*/", path, t)
+                }
+                else {
+                    write!(f, "{}", path)
+                }
+            }
+            else {
+                write!(f, "{:?}", path)
+            }
+        },
+        TypeKind::Pointer { is_const, inner } => {
+            f.write_str(if *is_const { "*const " } else { "*mut "})?;
+            inner.fmt(f, is_debug)
+        },
+        TypeKind::Array { inner, count } => {
+            f.write_str("[")?;
+            inner.fmt(f, is_debug)?;
+            f.write_str(";")?;
+            match count {
+            ArraySize::Unevaluated(_) => todo!(),
+            ArraySize::Known(v) => write!(f, "{}", v)?,
+            }
+            f.write_str("]")
+        },
+        }
+    }
+}
+
+impl ::core::fmt::Debug for Type {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.fmt(f, true)
+    }
+}
+impl ::core::fmt::Display for Type {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.fmt(f, false)
+    }
 }
 
 #[derive(Copy,Clone,Debug,PartialEq)]
