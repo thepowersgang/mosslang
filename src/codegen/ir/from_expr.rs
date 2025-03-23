@@ -185,8 +185,8 @@ impl<'a> Visitor<'a> {
             Value::Named(absolute_path, wrapper_list.add(super::Wrapper::Deref)),
             }
         },
-        ExprKind::Cast(expr, _) => todo!(),
-        ExprKind::Coerce(expr) => todo!(),
+        ExprKind::Cast(expr, _) => todo!("lower IR: cast"),
+        ExprKind::Coerce(expr) => todo!("lower IR: coerce"),
         ExprKind::UniOp(uni_op_ty, expr) => {
             let rv = self.output.allocate_slot(&expr.data_ty);
             let v = self.visit_expr(expr);
