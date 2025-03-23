@@ -115,17 +115,15 @@ fn parse_expr_nostruct(lex: &mut super::Lexer) -> super::Result<e::Expr> {
 macro_rules! def_left_assoc {
     ($name:ident, $next:ident, $v1:ident, $v2:ident => { $( $p:ident => $e:expr ),* }) => {
         fn $name(lex: &mut super::Lexer) -> super::Result<e::Expr> {
-            //#[allow(dead_code)]
-            #[allow(unused_mut)]
+            let ps = lex.start_span();
             let mut $v1 = $next(lex)?;
             loop {
-                let _ps = lex.start_span();
                 match lex.peek_no_eof()?
                 {
                 $( Token::Punct(Punct::$p) => {
                     lex.consume();
                     let $v2 = $next(lex)?;
-                    $v1 = $e.to_expr(lex.end_span(&_ps));
+                    $v1 = $e.to_expr(lex.end_span(&ps));
                     }),*
                 _ => break,
                 }
@@ -177,7 +175,7 @@ def_binops!{
     // - Boolean OR, Boolean AND
     parse_expr_bool_or { DoublePipe => BoolOr, DoubleAmp => BoolAnd };
     // - Equalities
-    parse_expr_eq { };
+    //parse_expr_eq { };
     // - Orderings
     parse_expr_cmp {
         DoubleEqual => Equals,
