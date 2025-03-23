@@ -8,6 +8,8 @@ struct LookupContext {
     statics: ::std::collections::HashMap<AbsolutePath, Type>,
     constants: ::std::collections::HashMap<AbsolutePath, Type>,
     functions: ::std::collections::HashMap<AbsolutePath, (Type,Vec<Type>,bool)>,
+
+    fields: ::std::collections::HashMap<AbsolutePath, ::std::collections::HashMap<crate::Ident,Type> >,
 }
 
 pub fn typecheck(ast_crate: &mut crate::ast::Crate)
@@ -46,17 +48,27 @@ fn enumerate_mod(lc: &mut LookupContext, module: &crate::ast::items::Module, pat
         },
         ItemType::TypeAlias(_ty) => {
         },
-        ItemType::Struct(_str) => {
+        ItemType::Struct(s) => {
+            let fields = s.fields.iter().map(|v| (v.name.clone(), v.ty.clone())).collect();
+            lc.fields.insert(
+                path.append(v.name.as_ref().unwrap().clone()),
+                fields
+            );
         },
         ItemType::Enum(_enm) => {
         },
-        ItemType::Union(_) => {
+        ItemType::Union(u) => {
+            //let fields = u.fields.iter().map(|v| (v.name, v.ty.clone())).collect();
+            //lc.fields.insert(
+            //    path.append(v.name.as_ref().unwrap().clone()),
+            //    fields
+            //);
         },
         ItemType::Function(function) => {
-            lc.functions.insert(
-                path.append(v.name.as_ref().unwrap().clone()),
-                (function.sig.ret.clone(), function.sig.args.iter().map(|(_,t)| t.clone()).collect(), function.sig.is_variadic)
-            );
+            let k = path.append(v.name.as_ref().unwrap().clone());
+            let v = (function.sig.ret.clone(), function.sig.args.iter().map(|(_,t)| t.clone()).collect(), function.sig.is_variadic);
+            println!("fn {k:?} = {v:?}");
+            lc.functions.insert(k,v);
         },
         ItemType::Static(i) => {
             lc.statics.insert(
@@ -117,14 +129,13 @@ fn typecheck_mod(lc: &LookupContext, module: &mut crate::ast::items::Module)
     }
 }
 
-
 fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crate::ast::ExprRoot, args: &mut [(crate::ast::Pattern, crate::ast::Type)])
 {
     // Enumerate ivars
     let mut ivars = Vec::new();
 
     {
-        let mut es = EnumerateState { ivars: &mut ivars };
+        let mut es = IvarEnumerate { ivars: &mut ivars };
         expr.variables.reserve(expr.variable_count);
         for (_, t) in args {
             expr.variables.push(t.clone());
@@ -135,118 +146,220 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
         }
         crate::ast::visit_mut_expr(&mut es, &mut expr.e);
     }
+
     // Assign/solve
-    let mut revisits = Vec::new();
-    let mut ss = SolveState {
-        ivars: &mut ivars,
-        lc, ret_ty, local_tys: &mut expr.variables,
-        revisits: &mut revisits,
-        loop_stack: Vec::new()
-    };
-    crate::ast::visit_mut_expr(&mut ss, &mut expr.e);
+    let mut rules = Rules::default();
+    {
+        let mut ss: RuleEnumerate<'_, '_> = RuleEnumerate {
+            ivars: &mut ivars,
+            lc, ret_ty, local_tys: &mut expr.variables,
+            rules: &mut rules,
+            loop_stack: Vec::new()
+        };
+        crate::ast::visit_mut_expr(&mut ss, &mut expr.e);
+    }
+
+    #[derive(Default)]
+    struct Rules {
+        revisits: Vec<(crate::Span,Type,Revisit)>,
+    }
+    /// Ivar possiblity rules
+    struct IvarRules {
+    }
+    impl IvarRules {
+        fn coerce_to(&mut self, idx: usize, ty: Type) {
+        }
+        fn coerce_from(&mut self, idx: usize, ty: Type) {
+        }
+    }
+    let mut ir = IvarRules {};
 
     fn get_ivar<'a>(ivars: &'a [Type], mut ty: &'a Type) -> &'a Type {
+        let mut prev_ty = ty;
         while let TypeKind::Infer { index, .. } = ty.kind {
-            ty = &ivars[index.unwrap()];
+            let Some(index) = index else { return prev_ty; };
+            prev_ty = ty;
+            ty = &ivars[index];
         }
         ty
     }
 
-    while !revisits.is_empty() {
-        let n = revisits.len();
-        revisits.retain(|(span, ty, op)| {
-            println!("{INDENT}revisit {ty:?} = {op:?}");
+    // Run solver
+    while !rules.revisits.is_empty() {
+        let n = rules.revisits.len();
+        rules.revisits.retain(|(span, dst_ty, op)| {
+            println!("{INDENT}revisit {dst_ty:?} = {op:?}");
             enum R {
                 Keep,
                 Consume,
             }
-            matches!(match op {
-            Revisit::Deref(inner_ty) =>
-                match &get_ivar(&ivars, inner_ty).kind {
-                TypeKind::Infer { .. } => R::Keep,
-                TypeKind::Pointer { inner, .. } => {
-                    let inner = (*inner).clone();
-                    equate_types(span, &mut ivars, ty, &inner);
-                    R::Consume
-                }
-                _ => panic!("{span}: Type error: Deref on unsupported type {:?}", inner_ty),
+            let r = match op {
+                Revisit::Coerce(src_ty) => {
+                    let t_l = get_ivar(&ivars, dst_ty);
+                    let t_r = get_ivar(&ivars, src_ty);
+                    match (&t_l.kind, &t_r.kind) {
+                    _ if ::std::ptr::eq(t_l, t_r) => R::Consume,
+                    (TypeKind::Infer { index: i_l, .. }, TypeKind::Infer { index: i_r, .. }) => {
+                        ir.coerce_from(i_l.unwrap(), t_r.clone());
+                        ir.coerce_to(i_r.unwrap(), t_l.clone());
+                        R::Keep
+                        },
+                    (TypeKind::Infer { index: i_l, .. }, _) => {
+                        ir.coerce_from(i_l.unwrap(), t_r.clone());
+                        R::Keep
+                        },
+                    (_, TypeKind::Infer { index: i_r, .. }) => {
+                        ir.coerce_to(i_r.unwrap(), t_l.clone());
+                        R::Keep
+                        },
+                    (TypeKind::Integer(ic_l), TypeKind::Integer(ic_r)) => {
+                        if ic_l != ic_r {
+                            // TODO: Check if this coerce is valid
+                            //match (ic_l, ic_r) {
+                            //()
+                            //}
+                        }
+                        R::Consume
+                        },
+                    (TypeKind::Pointer { is_const: c_l, inner: i_l }, TypeKind::Pointer { is_const: c_r, inner: i_r }) => {
+                        // If the source is a constant pointer, the destination must be a constant
+                        if *c_r && !*c_l {
+                            // Type error
+                            equate_types(span, &mut ivars, dst_ty, src_ty);
+                            unreachable!();
+                        }
+                        let inner_dst = get_ivar(&ivars, i_l);
+                        let inner_src = get_ivar(&ivars, i_r);
+                        match (&inner_dst.kind,&inner_src.kind) {
+                        (TypeKind::Infer { index: Some(idx), .. }, _) => {
+                            ir.coerce_from(*idx, inner_src.clone());
+                            R::Keep
+                        },
+                        (_, TypeKind::Infer { index: Some(idx), .. }) => {
+                            ir.coerce_to(*idx, inner_dst.clone());
+                            R::Keep
+                        },
+                        (TypeKind::Void, _) => R::Consume,
+                        (_, TypeKind::Void) => R::Consume,
+                        _ => {
+                            // Equate the inners, as the constness may have changed
+                            let i_l = (**i_l).clone();
+                            let i_r = (**i_r).clone();
+                            equate_types(span, &mut ivars, &i_l, &i_r);
+                            R::Consume
+                        }
+                        }
+                        },
+                    _ => todo!("{span}: {} := {}", t_l, t_r),
+                    }
                 },
-            Revisit::Index(val_ty, index_ty) => match &get_ivar(&ivars, val_ty).kind {
-                TypeKind::Infer { .. } => R::Keep,
+                Revisit::Deref(inner_ty) =>
+                    match &get_ivar(&ivars, inner_ty).kind {
+                    TypeKind::Infer { .. } => R::Keep,
+                    TypeKind::Pointer { inner, .. } => {
+                        let inner = (*inner).clone();
+                        equate_types(span, &mut ivars, dst_ty, &inner);
+                        R::Consume
+                    }
+                    _ => panic!("{span}: Type error: Deref on unsupported type {:?}", inner_ty),
+                    },
+                Revisit::Index(val_ty, _index_ty) => match &get_ivar(&ivars, val_ty).kind {
+                    TypeKind::Infer { .. } => R::Keep,
 
-                TypeKind::Pointer { inner, .. }
-                | TypeKind::Array { inner, .. } => {
-                    let inner = (*inner).clone();
-                    equate_types(span, &mut ivars, ty, &inner);
-                    //equate_types(&mut ivars, &Type::new_integer(crate::ast::ty::IntClass::PtrInt), index_ty);
-                    R::Consume
-                }
-                _ => panic!("{span}: Type error: Index on unsupported type {:?}", val_ty),
+                    TypeKind::Pointer { inner, .. }
+                    | TypeKind::Array { inner, .. } => {
+                        let inner = (*inner).clone();
+                        equate_types(span, &mut ivars, dst_ty, &inner);
+                        //equate_types(&mut ivars, &Type::new_integer(crate::ast::ty::IntClass::PtrInt), index_ty);
+                        R::Consume
+                    }
+                    _ => panic!("{span}: Type error: Index on unsupported type {:?}", val_ty),
+                    },
+                Revisit::FieldNamed(ty, name) => {
+                    use crate::ast::path::TypeBinding;
+                    let ty = get_ivar(&ivars, ty);
+                    match &ty.kind {
+                    TypeKind::Infer { .. } => R::Keep,
+                    TypeKind::Named(_, Some(TypeBinding::Alias(_))) => panic!("Unresolved type alias - {}", ty),
+                    TypeKind::Named(_, Some(TypeBinding::Union(p))) => todo!("Field from union - {}", ty),
+                    TypeKind::Named(_, Some(TypeBinding::Struct(p))) => {
+                        let Some(f) = lc.fields.get(p) else { panic!("{span}: BUG: No fields on {}", ty) };
+                        let Some(fld_ty) = f.get(name) else {
+                            panic!("{span}: No field {} on type {}", name, ty);
+                        };
+                        equate_types(span, &mut ivars, dst_ty, fld_ty);
+                        R::Consume
+                    },
+                    _ => panic!("{span}: Getting field from invalid type - {}", ty),
+                    }
                 },
-            Revisit::FieldNamed(_, ident) => todo!("field named"),
-            Revisit::FieldIndex(_, _) => todo!("field index"),
-            Revisit::BinOp(ty_l, bin_op_ty, ty_r) => {
-                //let ty_l = get_ivar(&ivars, ty_l);
-                //let ty_r = get_ivar(&ivars, ty_r);
-                use crate::ast::expr::BinOpTy;
-                match bin_op_ty {
-                // Arithmatic operations yield the promoted type of the two
-                BinOpTy::Add
-                |BinOpTy::Sub
-                |BinOpTy::Mul
-                |BinOpTy::Div
-                |BinOpTy::Rem => {
-                    todo!()
-                }
+                Revisit::FieldIndex(_, _) => todo!("field index"),
+                Revisit::BinOp(ty_l, bin_op_ty, ty_r) => {
+                    use crate::ast::expr::BinOpTy;
+                    match bin_op_ty {
+                    // Arithmatic operations yield the promoted type of the two
+                    BinOpTy::Add
+                    |BinOpTy::Sub
+                    |BinOpTy::Mul
+                    |BinOpTy::Div
+                    |BinOpTy::Rem => {
+                        //let ty_l = get_ivar(&ivars, ty_l);
+                        //let ty_r = get_ivar(&ivars, ty_r);
+                        //todo!("binop {} and {}", ty_l, ty_r)
+                        equate_types(span, &mut ivars, ty_l, ty_r);
+                        equate_types(span, &mut ivars, dst_ty, ty_l);
+                        R::Consume
+                    }
 
-                // Bitwise requires equal
-                BinOpTy::BitAnd
-                |BinOpTy::BitOr
-                |BinOpTy::BitXor => {
-                    equate_types(span, &mut ivars, ty_l, ty_r);
-                    equate_types(span, &mut ivars, ty, ty_l);
-                    R::Consume
-                },
-                // Shifts yield the LHS type, RHS must be an integer
-                BinOpTy::Shl|BinOpTy::Shr => {
-                    equate_types(span, &mut ivars, ty, ty_l);
-                    R::Consume
-                },
-                
-                // For comparisons, types must be equal. Result is bool
-                BinOpTy::Equals
-                |BinOpTy::NotEquals
-                |BinOpTy::Lt | BinOpTy::LtEquals
-                |BinOpTy::Gt | BinOpTy::GtEquals => {
-                    equate_types(span, &mut ivars, ty_l, ty_r);
-                    equate_types(span, &mut ivars, ty, &Type::new_bool());
-                    R::Consume
-                },
+                    // Bitwise requires equal
+                    BinOpTy::BitAnd
+                    |BinOpTy::BitOr
+                    |BinOpTy::BitXor => {
+                        equate_types(span, &mut ivars, ty_l, ty_r);
+                        equate_types(span, &mut ivars, dst_ty, ty_l);
+                        R::Consume
+                    },
+                    // Shifts yield the LHS type, RHS must be an integer
+                    BinOpTy::Shl|BinOpTy::Shr => {
+                        equate_types(span, &mut ivars, dst_ty, ty_l);
+                        R::Consume
+                    },
+                    
+                    // For comparisons, types must be equal. Result is bool
+                    BinOpTy::Equals
+                    |BinOpTy::NotEquals
+                    |BinOpTy::Lt | BinOpTy::LtEquals
+                    |BinOpTy::Gt | BinOpTy::GtEquals => {
+                        equate_types(span, &mut ivars, ty_l, ty_r);
+                        equate_types(span, &mut ivars, dst_ty, &Type::new_bool());
+                        R::Consume
+                    },
 
-                // Boolean operations require integer inputs? Result is a bool
-                BinOpTy::BoolAnd|BinOpTy::BoolOr => {
-                    // TODO: Check for integer or pointer input (or force bool and add coercions)
-                    equate_types(span, &mut ivars, ty, &Type::new_bool());
-                    R::Consume
+                    // Boolean operations require integer inputs? Result is a bool
+                    BinOpTy::BoolAnd|BinOpTy::BoolOr => {
+                        // TODO: Check for integer or pointer input (or force bool and add coercions)
+                        equate_types(span, &mut ivars, dst_ty, &Type::new_bool());
+                        R::Consume
+                    },
+                    }
+                    },
+                Revisit::UniOp(uni_op_ty, in_ty) => {
+                    match uni_op_ty
+                    {
+                    crate::ast::expr::UniOpTy::Invert => {
+                        equate_types(span, &mut ivars, dst_ty, in_ty);
+                        R::Consume
+                    },
+                    crate::ast::expr::UniOpTy::Negate => {
+                        equate_types(span, &mut ivars, dst_ty, in_ty);
+                        R::Consume
+                    },
+                    }
                 },
-                }
-                },
-            Revisit::UniOp(uni_op_ty, in_ty) => {
-                match uni_op_ty
-                {
-                crate::ast::expr::UniOpTy::Invert => {
-                    equate_types(span, &mut ivars, ty, in_ty);
-                    R::Consume
-                },
-                crate::ast::expr::UniOpTy::Negate => {
-                    equate_types(span, &mut ivars, ty, in_ty);
-                    R::Consume
-                },
-                }
-            },
-            }, R::Keep)
+                };
+            matches!(r, R::Keep)
         });
-        assert!(revisits.len() < n);
+        assert!(rules.revisits.len() < n);
     }
     
     struct FmtWithIvars<'a>(&'a [Type],&'a Type);
@@ -307,7 +420,7 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
             let mut i2 = i2.expect("Unspecified ivar");
             while let TypeKind::Infer { index: Some(i), .. } = ivars[i1].kind {
                 assert!(i2 != i, "Recursion at {:?}", ivars[i1]);
-                println!("{INDENT}equate_types: {} -> {}", i1, i);
+                println!("{INDENT}equate_types: #{} -> {}", i1, i);
                 i1 = i;
             }
             while let TypeKind::Infer { index: Some(i), .. } = ivars[i2].kind {
@@ -435,10 +548,10 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
         }
     }
 
-    struct EnumerateState<'a> {
+    struct IvarEnumerate<'a> {
         ivars: &'a mut Vec<crate::ast::Type>,
     }
-    impl<'a> EnumerateState<'a> {
+    impl<'a> IvarEnumerate<'a> {
         fn fill_ivars_in(&mut self, ty: &mut crate::ast::Type) {
             match &mut ty.kind {
             TypeKind::Infer { explicit: _, index } => {
@@ -465,7 +578,7 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
             }
         }
     }
-    impl<'a> crate::ast::ExprVisitor for EnumerateState<'a> {
+    impl<'a> crate::ast::ExprVisitor for IvarEnumerate<'a> {
         fn visit_mut_expr(&mut self, expr: &mut crate::ast::expr::Expr) {
             self.fill_ivars_in(&mut expr.data_ty);
             match expr.kind {
@@ -502,15 +615,15 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
         }
     }
 
-    struct SolveState<'a, 'b> {
+    struct RuleEnumerate<'a, 'b> {
         ivars: &'a mut [crate::ast::Type],
-        revisits: &'a mut Vec<(crate::Span, Type, Revisit,)>,
+        rules: &'a mut Rules,
         lc: &'b LookupContext,
         ret_ty: &'b crate::ast::Type,
         local_tys: &'b [crate::ast::Type],
         loop_stack: Vec<crate::ast::Type>,
     }
-    impl SolveState<'_, '_> {
+    impl RuleEnumerate<'_, '_> {
         fn equate_types(&mut self, span: &crate::Span, l: &crate::ast::Type, r: &crate::ast::Type) {
             equate_types(span, &mut self.ivars, l, r);
         }
@@ -575,8 +688,26 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
                 }
             }
         }
+
+        fn push_revisit(&mut self, span: &crate::Span, dst_ty: &Type, revisit: Revisit) {
+            self.rules.revisits.push((span.clone(), dst_ty.clone(), revisit,));
+        }
+        fn make_coerce(&mut self, span: &crate::Span, dst_ty: Type, src_node: &mut crate::ast::expr::Expr) {
+            let src_ty = src_node.data_ty.clone();
+            let null_expr = crate::ast::expr::Expr {
+                kind: crate::ast::expr::ExprKind::Continue,
+                data_ty: Type::new_infer(),
+                span: src_node.span.clone(),
+                };
+            *src_node = crate::ast::expr::Expr {
+                kind: crate::ast::expr::ExprKind::Coerce(Box::new( ::std::mem::replace(src_node, null_expr) )),
+                data_ty: dst_ty.clone(),
+                span: span.clone(),
+            };
+            self.rules.revisits.push((span.clone(), dst_ty.clone(), Revisit::Coerce(src_ty),));
+        }
     }
-    impl<'a, 'b> crate::ast::ExprVisitor for SolveState<'a, 'b> {
+    impl<'a, 'b> crate::ast::ExprVisitor for RuleEnumerate<'a, 'b> {
         fn visit_mut_expr(&mut self, expr: &mut crate::ast::expr::Expr) {
             let _i = INDENT.inc_f("visit_expr", format_args!("{:?}", &expr.kind));
 
@@ -614,12 +745,13 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
             use crate::ast::Type;
             use crate::ast::expr::ExprKind;
             match &mut expr.kind {
+            ExprKind::Coerce(..) => panic!("Shouldn't be seeing coerce ops"),
             ExprKind::Block(block) => {
                 if let Some(e) = &block.result {
                     self.equate_types(&expr.span, &expr.data_ty, &e.data_ty);
                 }
                 else {
-                    self.equate_types(&expr.span, &expr.data_ty, &&Type::new_unit());
+                    self.equate_types(&expr.span, &expr.data_ty, &Type::new_unit());
                 }
             },
             ExprKind::LiteralString(_) => {
@@ -642,7 +774,7 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
                 // Don't set type - this is a diverge
             },
             ExprKind::Continue => {
-                // Don't set type?
+                // Don't set type - this is a diverge
             },
             ExprKind::Break(value) => {
                 let ty = self.loop_stack.last().unwrap().clone();
@@ -652,7 +784,7 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
                 else {
                     self.equate_types(&expr.span, &ty, &Type::new_unit());
                 }
-
+                // Don't set type - this is a diverge
             },
             ExprKind::Assign { slot, op, value } => {
                 self.equate_types(&expr.span, &slot.data_ty, &value.data_ty);
@@ -709,9 +841,9 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
                             panic!("Wrong argument count to function: {:?}", absolute_path)
                         }
                     }
-                    for (i, (req_ty,arg_expr)) in Iterator::zip(arg_tys.iter(), args.iter()).enumerate() {
+                    for (i, (req_ty,arg_expr)) in Iterator::zip(arg_tys.iter(), args.iter_mut()).enumerate() {
                         println!("{INDENT}arg{} : {:?}", i, req_ty);
-                        self.equate_types(&arg_expr.span, req_ty, &arg_expr.data_ty);
+                        self.make_coerce(&expr.span, req_ty.clone(), arg_expr);
                     }
                 },
                 ValueBinding::Static(absolute_path) => todo!(),
@@ -725,32 +857,33 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
                 self.equate_types(&expr.span, &expr.data_ty, &ty);
             },
             ExprKind::FieldNamed(expr_v, ident) => {
-                self.revisits.push((expr.span.clone(), expr.data_ty.clone(), Revisit::FieldNamed(expr_v.data_ty.clone(), ident.clone()),));
+                self.push_revisit(&expr.span, &expr.data_ty, Revisit::FieldNamed(expr_v.data_ty.clone(), ident.clone()));
             },
             ExprKind::FieldIndex(expr_v, idx) => {
-                self.revisits.push((expr.span.clone(), expr.data_ty.clone(), Revisit::FieldIndex(expr_v.data_ty.clone(), *idx),));
+                self.push_revisit(&expr.span, &expr.data_ty, Revisit::FieldIndex(expr_v.data_ty.clone(), *idx));
             },
             ExprKind::Index(expr_v, expr_i) => {
+                self.make_coerce(&expr.span, Type::new_integer(crate::ast::ty::IntClass::PtrInt), expr_i);
                 // Defer - this is a revisit
                 // - Although the index should be an integer?
-                self.revisits.push((expr.span.clone(), expr.data_ty.clone(), Revisit::Index(expr_v.data_ty.clone(), expr_i.data_ty.clone()),));
+                self.push_revisit(&expr.span, &expr.data_ty, Revisit::Index(expr_v.data_ty.clone(), expr_i.data_ty.clone()));
             },
             ExprKind::Addr(is_mut, expr_v) => {
                 let ty = Type::new_ptr( !*is_mut, expr_v.data_ty.clone() );
                 self.equate_types(&expr.span, &expr.data_ty, &ty);
             },
             ExprKind::Deref(val_expr) => {
-                self.revisits.push((expr.span.clone(), expr.data_ty.clone(), Revisit::Deref( val_expr.data_ty.clone()),));
+                self.push_revisit(&expr.span, &expr.data_ty, Revisit::Deref( val_expr.data_ty.clone()));
             },
             ExprKind::Cast(expr_v, ty) => {
                 self.equate_types(&expr.span, &expr.data_ty, ty);
             },
             ExprKind::UniOp(uni_op_ty, val_expr) => {
                 self.equate_types(&expr.span, &expr.data_ty, &expr.data_ty);
-                self.revisits.push((expr.span.clone(), expr.data_ty.clone(), Revisit::UniOp(*uni_op_ty, val_expr.data_ty.clone()),));
+                self.push_revisit(&expr.span, &expr.data_ty, Revisit::UniOp(*uni_op_ty, val_expr.data_ty.clone()));
             },
             ExprKind::BinOp(bin_op_ty, expr_l, expr_r) => {
-                self.revisits.push((expr.span.clone(), expr.data_ty.clone(), Revisit::BinOp(expr_l.data_ty.clone(), *bin_op_ty, expr_r.data_ty.clone()),));
+                self.push_revisit(&expr.span, &expr.data_ty, Revisit::BinOp(expr_l.data_ty.clone(), *bin_op_ty, expr_r.data_ty.clone()));
             },
             ExprKind::CallValue(expr, exprs) => todo!("CallValue"),
             ExprKind::Loop { body } => {
@@ -811,6 +944,7 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
 
     #[derive(Debug)]
     enum Revisit {
+        Coerce(Type),
         Deref(Type),
         Index(Type, Type),
         FieldNamed(Type, crate::Ident),

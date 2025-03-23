@@ -131,6 +131,7 @@ pub fn visit_mut_expr(c: &mut dyn ExprVisitor, expr: &mut crate::ast::expr::Expr
     ExprKind::Addr(_, expr) => c.visit_mut_expr(expr),
     ExprKind::Deref(expr) => c.visit_mut_expr(expr),
     ExprKind::Cast(expr, _) => c.visit_mut_expr(expr),
+    ExprKind::Coerce(expr) => c.visit_mut_expr(expr),
     ExprKind::UniOp(_uni_op_ty, expr) => c.visit_mut_expr(expr),
     ExprKind::BinOp(_bin_op_ty, expr_l, expr_r) => {
         c.visit_mut_expr(expr_l);

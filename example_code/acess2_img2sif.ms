@@ -22,13 +22,13 @@ struct sFILE {
     ...
 }
 type FILE = *mut sFILE;
-const NULL: *mut () = 0;
+const NULL: *mut void = 0;
 extern {
     static stderr: FILE;
 	fn fopen(path: *const c_char, mode: *const c_char) -> FILE;
 	fn fclose(file: FILE);
 	fn fprintf(file: FILE, s: *const c_char, ...) -> i32;
-    fn fwrite(data: *const (), count: usize, size: usize, fp: FILE);
+    fn fwrite(data: *const void, count: usize, size: usize, fp: FILE);
 
 	fn strcmp(s1: *const c_char, s2: *const c_char) -> i32;
 	fn memcmp(s1: *const (), s2: *const (), count: usize) -> i32;
@@ -36,7 +36,7 @@ extern {
 	fn perror(msg: *const c_char);
 
 	fn malloc(size: usize) -> *mut ();
-	fn free(ptr: *mut ());
+	fn free(ptr: *const void);
 }
 // </libc>
 
@@ -50,12 +50,12 @@ enum Compression {
 
 extern "C" fn main(argc: usize, argv: *const *const c_char) -> i32 {
 
-    let mut input_file = 0;
-    let mut output_file = 0;
+    let mut input_file = 0p as *const c_char;
+    let mut output_file = 0p as _;
     let mut comp = Compression::Auto;
 
     for i in 1 .. argc {
-        if argv[i][0] != b'-' {
+        if argv[i][0] != b'-' as i8 {
             // Free args
             if input_file == 0 {
                 input_file = argv[i];
@@ -67,7 +67,7 @@ extern "C" fn main(argc: usize, argv: *const *const c_char) -> i32 {
                 // Error
             }
         }
-        else if argv[i][1] != '-' {
+        else if argv[i][1] != '-' as i8 {
         }
         else {
             if strcmp(argv[i], "--uncompressed") == 0 {
@@ -92,14 +92,14 @@ extern "C" fn main(argc: usize, argv: *const *const c_char) -> i32 {
     let (w, h, pixel_count, buffer);
 	{
 		let img = IMG_Load(input_file);
-		if !img {
+		if img != 0p {
             return -1;
         }
 		
 		w = img.*.w;
 		h = img.*.h;
-		pixel_count = w * h;
-		buffer = malloc( pixel_count * 4 );
+		pixel_count = (w * h) as usize;
+		buffer = malloc( pixel_count * 4 ) as *mut u32;
 		
         let mut i = 0;
 		for y in 0 .. h
@@ -161,7 +161,7 @@ extern "C" fn main(argc: usize, argv: *const *const c_char) -> i32 {
     free(buffer);
 
     let fp = fopen(output_file, "w");
-    if !fp {
+    if fp == 0 {
         perror("Unable to open output");
         return -1;
     }

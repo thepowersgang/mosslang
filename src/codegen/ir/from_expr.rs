@@ -186,6 +186,7 @@ impl<'a> Visitor<'a> {
             }
         },
         ExprKind::Cast(expr, _) => todo!(),
+        ExprKind::Coerce(expr) => todo!(),
         ExprKind::UniOp(uni_op_ty, expr) => {
             let rv = self.output.allocate_slot(&expr.data_ty);
             let v = self.visit_expr(expr);

@@ -64,7 +64,10 @@ pub enum ExprKind
 
     Addr(bool, Box<Expr>),
     Deref(Box<Expr>),
+    /// Type cast operation
     Cast(Box<Expr>, super::Type),
+    /// Coercion point, injected by type checking
+    Coerce(Box<Expr>),
 
     UniOp(UniOpTy, Box<Expr>),
     BinOp(BinOpTy, Box<Expr>, Box<Expr>),
@@ -146,6 +149,8 @@ impl<'a> ::core::fmt::Debug for ExprKind {
             write!(f, "Deref(...)"),
         ExprKind::Cast(_expr, ty) => 
             write!(f, "Cast(... as {:?})", ty),
+        ExprKind::Coerce(_expr) => 
+            write!(f, "Coerce(...)"),
         ExprKind::UniOp(uni_op_ty, _expr) =>
             write!(f, "UniOp({:?}, ...)", uni_op_ty),
         ExprKind::BinOp(bin_op_ty, _expr_l, _expr_r) =>
