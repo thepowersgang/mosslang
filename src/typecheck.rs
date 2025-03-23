@@ -1,7 +1,8 @@
 use crate::INDENT;
 use crate::ast::path::AbsolutePath;
 use crate::ast::path::ValueBinding;
-use crate::ast::{Type,ty::TypeKind};
+use crate::ast::Type;
+use crate::ast::ty::{TypeKind,InferKind};
 
 #[derive(Default)]
 struct LookupContext {
@@ -131,6 +132,7 @@ fn typecheck_mod(lc: &LookupContext, module: &mut crate::ast::items::Module)
 
 fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crate::ast::ExprRoot, args: &mut [(crate::ast::Pattern, crate::ast::Type)])
 {
+    let root_span = expr.e.span.clone();
     // Enumerate ivars
     let mut ivars = Vec::new();
 
@@ -182,8 +184,10 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
 
     fn get_ivar<'a>(ivars: &'a [Type], mut ty: &'a Type) -> &'a Type {
         let mut prev_ty = ty;
+        let mut seen = ::std::collections::HashSet::new();
         while let TypeKind::Infer { index, .. } = ty.kind {
             let Some(index) = index else { return prev_ty; };
+            assert!( seen.insert(index), "Loop in {} at {}", prev_ty, ty );
             prev_ty = ty;
             ty = &ivars[index];
         }
@@ -192,13 +196,16 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
 
     // Run solver
     for pass_num in 0 .. {
+        for (i,ty) in ivars.iter().enumerate() {
+            println!("{INDENT} _#{} = {}", i, ty);
+        }
         if rules.revisits.is_empty() {
             break;
         }
         let _ih = INDENT.inc_f("revisit", format_args!("pass {}", pass_num));
         let n = rules.revisits.len();
         rules.revisits.retain(|(span, dst_ty, op)| {
-            println!("{INDENT}revisit {dst_ty:?} = {op:?}");
+            println!("{INDENT}revisit {dst_ty:?} = {op:?} @ {span}");
             enum R {
                 Keep,
                 Consume,
@@ -207,18 +214,20 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
                 Revisit::Coerce(src_ty) => {
                     let t_l = get_ivar(&ivars, dst_ty);
                     let t_r = get_ivar(&ivars, src_ty);
+                    println!("Revisit::Coerce: {} := {}", t_l, t_r);
                     match (&t_l.kind, &t_r.kind) {
                     _ if ::std::ptr::eq(t_l, t_r) => R::Consume,
-                    (TypeKind::Infer { index: i_l, .. }, TypeKind::Infer { index: i_r, .. }) => {
+                    _ if t_l == t_r => R::Consume,
+                    (TypeKind::Infer { index: i_l, kind: InferKind::None }, TypeKind::Infer { index: i_r, kind: InferKind::None }) => {
                         ir.coerce_from(i_l.unwrap(), t_r.clone());
                         ir.coerce_to(i_r.unwrap(), t_l.clone());
                         R::Keep
                         },
-                    (TypeKind::Infer { index: i_l, .. }, _) => {
+                    (TypeKind::Infer { index: i_l, kind: InferKind::None }, _) => {
                         ir.coerce_from(i_l.unwrap(), t_r.clone());
                         R::Keep
                         },
-                    (_, TypeKind::Infer { index: i_r, .. }) => {
+                    (_, TypeKind::Infer { index: i_r, kind: InferKind::None }) => {
                         ir.coerce_to(i_r.unwrap(), t_l.clone());
                         R::Keep
                         },
@@ -260,7 +269,10 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
                         }
                         }
                         },
-                    _ => todo!("{span}: {} := {}", t_l, t_r),
+                    _ => {
+                        equate_types(span, &mut ivars, dst_ty, src_ty);
+                        R::Consume
+                        }
                     }
                 },
                 Revisit::Deref(inner_ty) =>
@@ -303,95 +315,53 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
                     }
                 },
                 Revisit::FieldIndex(_, _) => todo!("field index"),
-                Revisit::BinOp(ty_l, bin_op_ty, ty_r) => {
-                    println!("{} {:?} {}", get_ivar(&ivars, ty_l), bin_op_ty, get_ivar(&ivars, ty_r));
-                    use crate::ast::expr::BinOpTy;
-                    match bin_op_ty {
-                    // Arithmatic operations yield the promoted type of the two
-                    BinOpTy::Add => {
-                        let ty_li = get_ivar(&ivars, ty_l);
-                        let ty_ri = get_ivar(&ivars, ty_r);
-                        match (&ty_li.kind, &ty_ri.kind) {
-                        (TypeKind::Infer { .. }, _) => R::Keep,
-                        (TypeKind::Pointer { .. }, TypeKind::Infer { .. }) => R::Keep,
-                        (TypeKind::Pointer { .. }, TypeKind::Integer(..)) => {
-                            equate_types(span, &mut ivars, ty_r, &Type::new_integer(crate::ast::ty::IntClass::PtrInt));
-                            equate_types(span, &mut ivars, dst_ty, ty_l);
-                            R::Consume
-                        },
-                        (TypeKind::Integer(..), _) => {
-                            equate_types(span, &mut ivars, ty_l, ty_r);
-                            equate_types(span, &mut ivars, dst_ty, ty_l);
-                            R::Consume
-                        },
-                        _ => todo!("Add {ty_li} + {ty_ri}"),
-                        }
+                Revisit::Add(ty_l, ty_r) => {
+                    println!("Revisit::Add: {} + {}", get_ivar(&ivars, ty_l), get_ivar(&ivars, ty_r));
+                    let ty_li = get_ivar(&ivars, ty_l);
+                    let ty_ri = get_ivar(&ivars, ty_r);
+                    match (&ty_li.kind, &ty_ri.kind) {
+                    (TypeKind::Infer { kind: InferKind::None, .. }, _) => R::Keep,
+                    (TypeKind::Pointer { .. }, TypeKind::Infer { kind: InferKind::None, .. }) => R::Keep,
+                    (TypeKind::Pointer { .. }, TypeKind::Infer { kind: InferKind::Integer, .. })
+                    |(TypeKind::Pointer { .. }, TypeKind::Integer(..)) => {
+                        equate_types(span, &mut ivars, ty_r, &Type::new_integer(crate::ast::ty::IntClass::PtrInt));
+                        equate_types(span, &mut ivars, dst_ty, ty_l);
+                        R::Consume
                     },
-                    BinOpTy::Sub => {
-                        let ty_li = get_ivar(&ivars, ty_l);
-                        let ty_ri = get_ivar(&ivars, ty_r);
-                        match (&ty_li.kind, &ty_ri.kind) {
-                        (TypeKind::Infer { .. }, _) => R::Keep,
-                        (TypeKind::Pointer { .. }, TypeKind::Infer { .. }) => R::Keep,
-                        (TypeKind::Pointer { .. }, TypeKind::Pointer { .. }) => {
-                            equate_types(span, &mut ivars, ty_l, ty_r);
-                            equate_types(span, &mut ivars, dst_ty, &Type::new_integer(crate::ast::ty::IntClass::PtrDiff));
-                            R::Consume
-                        },
-                        (TypeKind::Pointer { .. }, TypeKind::Integer(..)) => {
-                            equate_types(span, &mut ivars, ty_r, &Type::new_integer(crate::ast::ty::IntClass::PtrInt));
-                            equate_types(span, &mut ivars, dst_ty, ty_l);
-                            R::Consume
-                        },
-                        (TypeKind::Integer(..), _) => {
-                            equate_types(span, &mut ivars, ty_l, ty_r);
-                            equate_types(span, &mut ivars, dst_ty, ty_l);
-                            R::Consume
-                        },
-                        _ => todo!("Sub {ty_li} - {ty_ri}"),
-                        }
-                    },
-                    BinOpTy::Mul
-                    |BinOpTy::Div
-                    |BinOpTy::Rem => {
-                        //let ty_l = get_ivar(&ivars, ty_l);
-                        //let ty_r = get_ivar(&ivars, ty_r);
-                        //todo!("binop {} and {}", ty_l, ty_r)
+                    (TypeKind::Infer { kind: InferKind::Integer, .. }, _)
+                    | (TypeKind::Integer(..), _) => {
                         equate_types(span, &mut ivars, ty_l, ty_r);
                         equate_types(span, &mut ivars, dst_ty, ty_l);
                         R::Consume
+                    },
+                    _ => todo!("Add {ty_li} + {ty_ri}"),
                     }
-
-                    // Bitwise requires equal
-                    BinOpTy::BitAnd
-                    |BinOpTy::BitOr
-                    |BinOpTy::BitXor => {
+                    },
+                Revisit::Sub(ty_l, ty_r) => {
+                    println!("Revisit::Sub: {} - {}", get_ivar(&ivars, ty_l), get_ivar(&ivars, ty_r));
+                    let ty_li = get_ivar(&ivars, ty_l);
+                    let ty_ri = get_ivar(&ivars, ty_r);
+                    match (&ty_li.kind, &ty_ri.kind) {
+                    (TypeKind::Infer { kind: InferKind::None, .. }, _) => R::Keep,
+                    (TypeKind::Pointer { .. }, TypeKind::Infer { kind: InferKind::None, .. }) => R::Keep,
+                    (TypeKind::Pointer { .. }, TypeKind::Pointer { .. }) => {
+                        equate_types(span, &mut ivars, ty_l, ty_r);
+                        equate_types(span, &mut ivars, dst_ty, &Type::new_integer(crate::ast::ty::IntClass::PtrDiff));
+                        R::Consume
+                    },
+                    (TypeKind::Pointer { .. }, TypeKind::Infer { kind: InferKind::Integer, .. })
+                    | (TypeKind::Pointer { .. }, TypeKind::Integer(..)) => {
+                        equate_types(span, &mut ivars, ty_r, &Type::new_integer(crate::ast::ty::IntClass::PtrInt));
+                        equate_types(span, &mut ivars, dst_ty, ty_l);
+                        R::Consume
+                    },
+                    (TypeKind::Infer { kind: InferKind::Integer, .. }, _)
+                    |(TypeKind::Integer(..), _) => {
                         equate_types(span, &mut ivars, ty_l, ty_r);
                         equate_types(span, &mut ivars, dst_ty, ty_l);
                         R::Consume
                     },
-                    // Shifts yield the LHS type, RHS must be an integer
-                    BinOpTy::Shl|BinOpTy::Shr => {
-                        equate_types(span, &mut ivars, dst_ty, ty_l);
-                        R::Consume
-                    },
-                    
-                    // For comparisons, types must be equal. Result is bool
-                    BinOpTy::Equals
-                    |BinOpTy::NotEquals
-                    |BinOpTy::Lt | BinOpTy::LtEquals
-                    |BinOpTy::Gt | BinOpTy::GtEquals => {
-                        equate_types(span, &mut ivars, ty_l, ty_r);
-                        equate_types(span, &mut ivars, dst_ty, &Type::new_bool());
-                        R::Consume
-                    },
-
-                    // Boolean operations require integer inputs? Result is a bool
-                    BinOpTy::BoolAnd|BinOpTy::BoolOr => {
-                        // TODO: Check for integer or pointer input (or force bool and add coercions)
-                        equate_types(span, &mut ivars, dst_ty, &Type::new_bool());
-                        R::Consume
-                    },
+                    _ => todo!("Sub {ty_li} - {ty_ri}"),
                     }
                     },
                 Revisit::UniOp(uni_op_ty, in_ty) => {
@@ -421,6 +391,7 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
                     v.clear();
                     continue;
                 };
+                let dst_ty = Type { kind: TypeKind::Infer { kind: InferKind::None, index: Some(*idx) } };
                 println!("{INDENT} #{}: {:?}", idx, v);
                 
                 fn find_single(v: &std::collections::BTreeSet<(Type,bool)>, req_is_to: bool) -> Option<&Type> {
@@ -437,13 +408,13 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
                 }
                 if let Some(ty) = find_single(v, true) {
                     println!("{INDENT} IVar #{} = {} (single to)", idx, ty);
-                    ivars[*idx] = ty.clone();
+                    equate_types(&root_span, &mut ivars, &dst_ty, ty);
                     changed = true;
                     continue ;
                 }
                 if let Some(ty) = find_single(v, false) {
                     println!("{INDENT} IVar #{} = {} (single from)", idx, ty);
-                    ivars[*idx] = ty.clone();
+                    equate_types(&root_span, &mut ivars, &dst_ty, ty);
                     changed = true;
                     continue ;
                 }
@@ -455,10 +426,7 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
     struct FmtWithIvars<'a>(&'a [Type],&'a Type);
     impl<'a> ::std::fmt::Display for FmtWithIvars<'a> {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            let mut ty = self.1;
-            while let TypeKind::Infer { index, .. } = ty.kind {
-                ty = &self.0[index.unwrap()];
-            }
+            let ty = get_ivar(self.0, self.1);
             match &ty.kind {
             TypeKind::Tuple(items) => {
                 f.write_str("(")?;
@@ -565,6 +533,7 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
             let t1 = &mut ivars[i1];
             println!("{INDENT}equate_types(i-c): #{} {:?} = {:?}", i1, t1, r);
             if let TypeKind::Infer { index: None, .. } = t1.kind {
+                println!("{INDENT}equate_types(): IVar #{i1} = {:?}", r);
                 *t1 = r.clone();
                 Ok(())
             }
@@ -581,6 +550,7 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
             let t2 = &mut ivars[i2];
             println!("{INDENT}equate_types(c-i): {:?} = #{} {:?}", l, i2, t2);
             if let TypeKind::Infer { index: None, .. } = t2.kind {
+                println!("{INDENT}equate_types(): IVar #{i2} = {:?}", l);
                 *t2 = l.clone();
                 Ok( () )
             }
@@ -644,7 +614,7 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
     impl<'a> IvarEnumerate<'a> {
         fn fill_ivars_in(&mut self, ty: &mut crate::ast::Type) {
             match &mut ty.kind {
-            TypeKind::Infer { explicit: _, index } => {
+            TypeKind::Infer { index, kind: _ } => {
                 if index.is_none() {
                     *index = Some(self.ivars.len());
                     self.ivars.push(crate::ast::Type::new_infer());
@@ -670,19 +640,25 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
     }
     impl<'a> crate::ast::ExprVisitor for IvarEnumerate<'a> {
         fn visit_mut_expr(&mut self, expr: &mut crate::ast::expr::Expr) {
-            self.fill_ivars_in(&mut expr.data_ty);
             match expr.kind {
             crate::ast::expr::ExprKind::LiteralInteger(_, crate::ast::expr::IntLitClass::Unspecified) => {
-                // TODO: Can this create an ivar that is integer-only?
-            },
+                expr.data_ty = Type { kind: TypeKind::Infer { kind: crate::ast::ty::InferKind::Integer, index: None }};
+                },
             crate::ast::expr::ExprKind::LiteralInteger(_, crate::ast::expr::IntLitClass::Pointer) => {
                 expr.data_ty = Type::new_ptr(false, expr.data_ty.clone());
                 },
+            //crate::ast::expr::ExprKind::LiteralInteger(_, crate::ast::expr::IntLitClass::Unspecified) => {
+            //    expr.data_ty = Type { kind: TypeKind::Infer { kind: crate::ast::ty::InferKind::Integer, index: None }};
+            //    },
+            //crate::ast::expr::ExprKind::LiteralInteger(_, crate::ast::expr::IntLitClass::Pointer) => {
+            //    expr.data_ty = Type::new_ptr(false, expr.data_ty.clone());
+            //    },
             crate::ast::expr::ExprKind::Cast(_, ref mut ty) => {
                 self.fill_ivars_in(ty);
                 }
             _ => {},
             }
+            self.fill_ivars_in(&mut expr.data_ty);
             crate::ast::visit_mut_expr(self, expr);
         }
     
@@ -933,7 +909,8 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
                     }
                     for (i, (req_ty,arg_expr)) in Iterator::zip(arg_tys.iter(), args.iter_mut()).enumerate() {
                         println!("{INDENT}arg{} : {:?}", i, req_ty);
-                        self.make_coerce(&expr.span, req_ty.clone(), arg_expr);
+                        let s = arg_expr.span.clone();
+                        self.make_coerce(&s, req_ty.clone(), arg_expr);
                     }
                 },
                 ValueBinding::Static(absolute_path) => todo!(),
@@ -973,7 +950,30 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
                 self.push_revisit(&expr.span, &expr.data_ty, Revisit::UniOp(*uni_op_ty, val_expr.data_ty.clone()));
             },
             ExprKind::BinOp(bin_op_ty, expr_l, expr_r) => {
-                self.push_revisit(&expr.span, &expr.data_ty, Revisit::BinOp(expr_l.data_ty.clone(), *bin_op_ty, expr_r.data_ty.clone()));
+                use crate::ast::expr::BinOpTy;
+                match bin_op_ty {
+                // Comparisons coerce the RHS to LHS and return boolean
+                BinOpTy::Equals | BinOpTy::NotEquals
+                |BinOpTy::Lt | BinOpTy::LtEquals
+                |BinOpTy::Gt | BinOpTy::GtEquals => {
+                    self.make_coerce(&expr.span, expr_l.data_ty.clone(), expr_r);
+                    self.equate_types(&expr.span, &expr.data_ty, &Type::new_bool());
+                },
+                // Boolean operators coerce both inputs too bool and return bool
+                BinOpTy::BoolAnd | BinOpTy::BoolOr => {
+                    self.make_coerce(&expr.span, Type::new_bool(), expr_l);
+                    self.make_coerce(&expr.span, Type::new_bool(), expr_r);
+                    self.equate_types(&expr.span, &expr.data_ty, &Type::new_bool());
+                },
+                // Add and subtract need special logic for pointer arithmatic
+                BinOpTy::Add => self.push_revisit(&expr.span, &expr.data_ty, Revisit::Add(expr_l.data_ty.clone(), expr_r.data_ty.clone())),
+                BinOpTy::Sub => self.push_revisit(&expr.span, &expr.data_ty, Revisit::Sub(expr_l.data_ty.clone(), expr_r.data_ty.clone())),
+                // Everything else just coerces RHS to LHS and returns LHS
+                _ => {
+                    self.make_coerce(&expr.span, expr_l.data_ty.clone(), expr_r);
+                    self.equate_types(&expr.span, &expr.data_ty, &expr_l.data_ty);
+                }
+                }
             },
             ExprKind::CallValue(expr, exprs) => todo!("CallValue"),
             ExprKind::Loop { body } => {
@@ -1039,7 +1039,8 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
         Index(Type, Type),
         FieldNamed(Type, crate::Ident),
         FieldIndex(Type, usize),
-        BinOp(Type, crate::ast::expr::BinOpTy, Type),
+        Add(Type, Type),
+        Sub(Type, Type),
         UniOp(crate::ast::expr::UniOpTy, Type),
     }
 }

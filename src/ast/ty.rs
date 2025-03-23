@@ -18,7 +18,7 @@ impl Type
     }
     pub fn new_infer() -> Self {
         Type {
-            kind: TypeKind::Infer { explicit: false, index: None },
+            kind: TypeKind::Infer { index: None, kind: InferKind::None },
         }
     }
     pub fn new_path(p: super::Path) -> Self {
@@ -60,20 +60,25 @@ impl Type
 
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>, is_debug: bool) -> std::fmt::Result {
         match &self.kind {
-        TypeKind::Infer { explicit, index } => {
-            f.write_str(if *explicit { "_" } else { "" })?;
+        TypeKind::Infer { kind, index } => {
+            f.write_str("_")?;
             if let Some(index) = index {
-                write!(f, "#{}", index)
+                write!(f, "#{}", index)?
             }
             else {
-                write!(f, "#?")
+                write!(f, "#?")?
+            }
+            match kind {
+            InferKind::None => Ok(()),
+            InferKind::Integer => f.write_str("i"),
+            InferKind::Float => f.write_str("f"),
             }
         },
         TypeKind::Void => f.write_str("void"),
         TypeKind::Integer(int_class) => match int_class
             {
-            IntClass::PtrInt => f.write_str("isize"),
-            IntClass::PtrDiff => f.write_str("usize"),
+            IntClass::PtrInt => f.write_str("usize"),
+            IntClass::PtrDiff => f.write_str("isize"),
             IntClass::Signed(shift) => write!(f, "i{}", 8 << *shift),
             IntClass::Unsigned(shift) => write!(f, "u{}", 8 << *shift),
             },
@@ -189,7 +194,7 @@ impl Ord for ArraySize {
 pub enum TypeKind
 {
     Infer {
-        explicit: bool,
+        kind: InferKind,
         index: Option<usize>,
     },
     Void,   // As opposed to unit, void cannot exist
@@ -204,4 +209,11 @@ pub enum TypeKind
         inner: Box<Type>,
         count: ArraySize,
     }
+}
+#[derive(Clone,Debug)]
+#[derive(PartialOrd,Ord,PartialEq,Eq)]
+pub enum InferKind {
+    None,
+    Integer,
+    Float,
 }

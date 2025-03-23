@@ -10,9 +10,13 @@ extern {
 struct SDL_Surface {
     w: i32,
     h: i32,
+	pixels: *mut void,
+	format: *const SDL_Format,
+	pitch: usize,
     ...
 }
 struct SDL_Format {
+	BytesPerPixel: u8,
     ...
 }
 // </sdl>
@@ -31,8 +35,8 @@ extern {
     fn fwrite(data: *const void, count: usize, size: usize, fp: FILE);
 
 	fn strcmp(s1: *const c_char, s2: *const c_char) -> i32;
-	fn memcmp(s1: *const (), s2: *const (), count: usize) -> i32;
-	fn memcpy(dst: *mut (), src: *const (), count: usize) -> *mut ();
+	fn memcmp(s1: *const void, s2: *const void, count: usize) -> i32;
+	fn memcpy(dst: *mut void, src: *const void, count: usize) -> *mut void;
 	fn perror(msg: *const c_char);
 
 	fn malloc(size: usize) -> *mut ();
@@ -83,7 +87,7 @@ extern "C" fn main(argc: usize, argv: *const *const c_char) -> i32 {
 			}
 		}
 	}
-	if !input_file || !output_file {
+	if input_file == NULL || output_file == NULL {
 		fprintf(stderr, "Usage: %s <infile> <outfile>\n", argv[0]);
 		return 1;
 	}
@@ -225,7 +229,7 @@ fn RLE1_7(dest: *mut u8, src: *const u8, Size: usize, BlockSize: usize, BlockSte
 	
 	// Prevent errors
 	if Size < BlockSize { return -1; }
-	if !src { return -1; }
+	if src != 0p { return -1; }
 	if BlockSize <= 0 || BlockStep <= 0 { return -1; }
 	if MinRunLength < 1 {
         return -1;
@@ -272,7 +276,7 @@ fn RLE1_7(dest: *mut u8, src: *const u8, Size: usize, BlockSize: usize, BlockSte
 			// Save data
 			if dest != 0
 			{
-				dest[ret] = runlen | 0x80;	// Length (with high bit set)
+				dest[ret] = runlen as u8 | 0x80;	// Length (with high bit set)
                 ret += 1;
 				// Data
 				for k in 0 .. runlen
@@ -290,7 +294,7 @@ fn RLE1_7(dest: *mut u8, src: *const u8, Size: usize, BlockSize: usize, BlockSte
 		// RLE Range
 		else {
 			if dest != 0p {
-				dest[ret] = runlen;	// Length (with high bit unset)
+				dest[ret] = runlen as u8;	// Length (with high bit unset)
                 ret += 1;
 				memcpy(&mut dest[ret], &src[i*BlockStep], BlockSize);
 				ret += BlockSize;
@@ -313,7 +317,7 @@ fn GetARGB(srf: *mut SDL_Surface, x: i32, y: i32) -> u32
 {
 	let (mut r,mut g,mut b,mut a) = (0,0,0,0);
 	SDL_GetRGBA(
-		*( (srf.*.pixels + srf.*.format.*.BytesPerPixel*x + y * srf.*.pitch) as *const u32 ),
+		*( (srf.*.pixels + srf.*.format.*.BytesPerPixel as usize * x + srf.*.pitch * y) as *const u32 ),
 		srf.*.format, &r, &g, &b, &a
 		);
 	return ((a as u32) << 24) | ((r as u32) << 16) | ((g as u32) << 8) | ((b as u32));
