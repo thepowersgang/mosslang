@@ -1,5 +1,6 @@
 
 #[derive(Debug,Clone)]
+#[derive(PartialOrd,Ord,PartialEq,Eq)]
 pub struct Path
 {
     pub root: Root,
@@ -22,6 +23,7 @@ impl Path
 }
 
 #[derive(Debug,Clone)]
+#[derive(PartialOrd,Ord,PartialEq,Eq)]
 pub enum Root
 {
     None,   // Relative
@@ -30,7 +32,8 @@ pub enum Root
     Root,
 }
 
-#[derive(Clone,PartialEq,Eq,Hash)]
+#[derive(Clone,Hash)]
+#[derive(PartialOrd,Ord,PartialEq,Eq)]
 pub struct AbsolutePath(pub Vec<crate::Ident>);
 impl AbsolutePath {
     pub fn append(&self, v: crate::Ident) -> AbsolutePath {
@@ -60,7 +63,8 @@ pub enum ValueBinding
     StructValue(AbsolutePath),
     EnumVariant(AbsolutePath, usize)
 }
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
+#[derive(PartialOrd,Ord,PartialEq,Eq)]
 pub enum TypeBinding
 {
     Alias(AbsolutePath),

@@ -3,7 +3,8 @@
 use super::{Token,Punct};
 
 static INTERNER: ::std::sync::Mutex<Option<::string_interner::DefaultStringInterner>> = ::std::sync::Mutex::new(None);
-#[derive(Clone,PartialEq,Eq,Hash)]
+#[derive(Clone,Hash)]
+#[derive(PartialOrd,Ord,PartialEq,Eq)]
 pub struct Ident(::string_interner::DefaultSymbol);
 impl PartialEq<&'_ str> for Ident {
     fn eq(&self, other: &&'_ str) -> bool {

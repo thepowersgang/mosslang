@@ -57,7 +57,7 @@ fn enumerate_mod(lc: &mut LookupContext, module: &crate::ast::items::Module, pat
         },
         ItemType::Enum(_enm) => {
         },
-        ItemType::Union(u) => {
+        ItemType::Union(_u) => {
             //let fields = u.fields.iter().map(|v| (v.name, v.ty.clone())).collect();
             //lc.fields.insert(
             //    path.append(v.name.as_ref().unwrap().clone()),
@@ -164,15 +164,21 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
         revisits: Vec<(crate::Span,Type,Revisit)>,
     }
     /// Ivar possiblity rules
+    #[derive(Default)]
     struct IvarRules {
+        ivars: std::collections::HashMap<usize, ::std::collections::BTreeSet<(Type, bool)>>,
     }
     impl IvarRules {
         fn coerce_to(&mut self, idx: usize, ty: Type) {
+            let i = self.ivars.entry(idx).or_default();
+            i.insert((ty, true));
         }
         fn coerce_from(&mut self, idx: usize, ty: Type) {
+            let i = self.ivars.entry(idx).or_default();
+            i.insert((ty, false));
         }
     }
-    let mut ir = IvarRules {};
+    let mut ir = IvarRules::default();
 
     fn get_ivar<'a>(ivars: &'a [Type], mut ty: &'a Type) -> &'a Type {
         let mut prev_ty = ty;
@@ -185,7 +191,11 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
     }
 
     // Run solver
-    while !rules.revisits.is_empty() {
+    for pass_num in 0 .. {
+        if rules.revisits.is_empty() {
+            break;
+        }
+        let _ih = INDENT.inc_f("revisit", format_args!("pass {}", pass_num));
         let n = rules.revisits.len();
         rules.revisits.retain(|(span, dst_ty, op)| {
             println!("{INDENT}revisit {dst_ty:?} = {op:?}");
@@ -281,8 +291,7 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
                     match &ty.kind {
                     TypeKind::Infer { .. } => R::Keep,
                     TypeKind::Named(_, Some(TypeBinding::Alias(_))) => panic!("Unresolved type alias - {}", ty),
-                    TypeKind::Named(_, Some(TypeBinding::Union(p))) => todo!("Field from union - {}", ty),
-                    TypeKind::Named(_, Some(TypeBinding::Struct(p))) => {
+                    TypeKind::Named(_, Some(TypeBinding::Union(p) | TypeBinding::Struct(p))) => {
                         let Some(f) = lc.fields.get(p) else { panic!("{span}: BUG: No fields on {}", ty) };
                         let Some(fld_ty) = f.get(name) else {
                             panic!("{span}: No field {} on type {}", name, ty);
@@ -295,12 +304,54 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
                 },
                 Revisit::FieldIndex(_, _) => todo!("field index"),
                 Revisit::BinOp(ty_l, bin_op_ty, ty_r) => {
+                    println!("{} {:?} {}", get_ivar(&ivars, ty_l), bin_op_ty, get_ivar(&ivars, ty_r));
                     use crate::ast::expr::BinOpTy;
                     match bin_op_ty {
                     // Arithmatic operations yield the promoted type of the two
-                    BinOpTy::Add
-                    |BinOpTy::Sub
-                    |BinOpTy::Mul
+                    BinOpTy::Add => {
+                        let ty_li = get_ivar(&ivars, ty_l);
+                        let ty_ri = get_ivar(&ivars, ty_r);
+                        match (&ty_li.kind, &ty_ri.kind) {
+                        (TypeKind::Infer { .. }, _) => R::Keep,
+                        (TypeKind::Pointer { .. }, TypeKind::Infer { .. }) => R::Keep,
+                        (TypeKind::Pointer { .. }, TypeKind::Integer(..)) => {
+                            equate_types(span, &mut ivars, ty_r, &Type::new_integer(crate::ast::ty::IntClass::PtrInt));
+                            equate_types(span, &mut ivars, dst_ty, ty_l);
+                            R::Consume
+                        },
+                        (TypeKind::Integer(..), _) => {
+                            equate_types(span, &mut ivars, ty_l, ty_r);
+                            equate_types(span, &mut ivars, dst_ty, ty_l);
+                            R::Consume
+                        },
+                        _ => todo!("Add {ty_li} + {ty_ri}"),
+                        }
+                    },
+                    BinOpTy::Sub => {
+                        let ty_li = get_ivar(&ivars, ty_l);
+                        let ty_ri = get_ivar(&ivars, ty_r);
+                        match (&ty_li.kind, &ty_ri.kind) {
+                        (TypeKind::Infer { .. }, _) => R::Keep,
+                        (TypeKind::Pointer { .. }, TypeKind::Infer { .. }) => R::Keep,
+                        (TypeKind::Pointer { .. }, TypeKind::Pointer { .. }) => {
+                            equate_types(span, &mut ivars, ty_l, ty_r);
+                            equate_types(span, &mut ivars, dst_ty, &Type::new_integer(crate::ast::ty::IntClass::PtrDiff));
+                            R::Consume
+                        },
+                        (TypeKind::Pointer { .. }, TypeKind::Integer(..)) => {
+                            equate_types(span, &mut ivars, ty_r, &Type::new_integer(crate::ast::ty::IntClass::PtrInt));
+                            equate_types(span, &mut ivars, dst_ty, ty_l);
+                            R::Consume
+                        },
+                        (TypeKind::Integer(..), _) => {
+                            equate_types(span, &mut ivars, ty_l, ty_r);
+                            equate_types(span, &mut ivars, dst_ty, ty_l);
+                            R::Consume
+                        },
+                        _ => todo!("Sub {ty_li} - {ty_ri}"),
+                        }
+                    },
+                    BinOpTy::Mul
                     |BinOpTy::Div
                     |BinOpTy::Rem => {
                         //let ty_l = get_ivar(&ivars, ty_l);
@@ -359,7 +410,46 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
                 };
             matches!(r, R::Keep)
         });
-        assert!(rules.revisits.len() < n);
+        let mut changed = rules.revisits.len() < n;
+        if !changed {
+            for (idx, v) in &mut ir.ivars {
+                if v.len() == 0 {
+                    continue;
+                }
+                let TypeKind::Infer { index: None, .. } = ivars[*idx].kind else {
+                    // Known
+                    v.clear();
+                    continue;
+                };
+                println!("{INDENT} #{}: {:?}", idx, v);
+                
+                fn find_single(v: &std::collections::BTreeSet<(Type,bool)>, req_is_to: bool) -> Option<&Type> {
+                    let mut rv = None;
+                    for (ty,is_to) in v.iter() {
+                        if *is_to == req_is_to {
+                            if rv.is_some() {
+                                return None;
+                            }
+                            rv = Some(ty);
+                        }
+                    }
+                    return rv;
+                }
+                if let Some(ty) = find_single(v, true) {
+                    println!("{INDENT} IVar #{} = {} (single to)", idx, ty);
+                    ivars[*idx] = ty.clone();
+                    changed = true;
+                    continue ;
+                }
+                if let Some(ty) = find_single(v, false) {
+                    println!("{INDENT} IVar #{} = {} (single from)", idx, ty);
+                    ivars[*idx] = ty.clone();
+                    changed = true;
+                    continue ;
+                }
+            }
+        }
+        assert!(changed);
     }
     
     struct FmtWithIvars<'a>(&'a [Type],&'a Type);

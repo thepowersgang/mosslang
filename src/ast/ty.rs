@@ -1,4 +1,5 @@
 #[derive(Clone)]
+#[derive(PartialOrd,Ord,PartialEq,Eq)]
 pub struct Type
 {
     pub kind: TypeKind,
@@ -134,7 +135,8 @@ impl ::core::fmt::Display for Type {
     }
 }
 
-#[derive(Copy,Clone,Debug,PartialEq)]
+#[derive(Copy,Clone,Debug)]
+#[derive(PartialOrd,Ord,PartialEq,Eq)]
 pub enum IntClass {
     /// rust's usize
     PtrInt,
@@ -159,8 +161,31 @@ impl Clone for ArraySize {
         }
     }
 }
+impl Eq for ArraySize {
+}
+impl PartialEq for ArraySize {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == ::std::cmp::Ordering::Equal
+    }
+}
+impl PartialOrd for ArraySize {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl Ord for ArraySize {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        match (self, other) {
+        (Self::Unevaluated(_l0), Self::Unevaluated(_r0)) => todo!("Compare ArraySize::Unevaluated"),
+        (Self::Unevaluated(_), _) => ::std::cmp::Ordering::Less,
+        (Self::Known(l0), Self::Known(r0)) => l0.cmp(r0),
+        (Self::Known(_), _) => ::std::cmp::Ordering::Greater,
+        }
+    }
+}
 
 #[derive(Clone,Debug)]
+#[derive(PartialOrd,Ord,PartialEq,Eq)]
 pub enum TypeKind
 {
     Infer {

@@ -116,7 +116,7 @@ impl<'a> ::core::fmt::Debug for ExprKind {
         ExprKind::Assign { slot: _, op, value: _ } =>
             write!(f, "Assign(..., {:?}, ...)", op),
         ExprKind::NamedValue(path, value_binding) =>
-            write!(f, "NamedValue({:?} [{:?})", path, value_binding),
+            write!(f, "NamedValue({:?} [{:?}])", path, value_binding),
         ExprKind::CallPath(path, value_binding, exprs) => {
             write!(f, "CallPath({:?} [{:?}] ( ", path, value_binding)?;
             for _ in exprs { 
