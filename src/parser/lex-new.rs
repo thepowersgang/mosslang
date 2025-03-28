@@ -286,7 +286,8 @@ impl RawLexer
             }
         }
         match self.cur_char() {
-        Some('e') => todo!("float"),
+        Some('e') => self.get_token_float(base, int_part, false),
+        Some('p') if base == 16 => self.get_token_float(base, int_part, false),
         Some(c) if c.is_ascii_alphabetic() => {
             let suffix = self.get_raw_ident(None)?;
             let cls = match &suffix[..] {
@@ -306,7 +307,7 @@ impl RawLexer
                 self.un_advance();
                 Ok(Token::Literal(super::Literal::Integer(int_part, None)))
             }
-            Some(c) if c.is_numeric() => todo!("float"),
+            Some(c) if c.is_digit(base) => self.get_token_float(base, int_part, true),
             // <int> . <ident>
             Some(c) if c.is_alphabetic() || c == '_' => {
                 self.un_advance();
@@ -315,6 +316,43 @@ impl RawLexer
             _ => Ok(Token::Literal(super::Literal::Float(int_part as _, None))),
             },
         _ => Ok(Token::Literal(super::Literal::Integer(int_part, None))),
+        }
+    }
+    fn get_token_float(&mut self, base: u32, int_part: u128, is_fraction: bool) -> ::std::io::Result<Token> {
+        let mut frac_part = String::new();
+        if is_fraction {
+            frac_part.push( self.cur_char().unwrap() );
+            loop {
+                match self.advance()? {
+                Some(c) if c.is_digit(base) => frac_part.push(c),
+                _ => break,
+                }
+            }
+        }
+        match self.cur_char() {
+        Some('e') => todo!("exponent - decimal"),
+        Some('p') if base == 16 => todo!("exponent - hex"),
+        _ => {},
+        }
+    
+        let value: f64 = format!("{}{}.{}", match base {
+            10 => "",
+            2 => "0b",
+            16 => "0x",
+            _ => unreachable!(),
+        }, int_part, frac_part).parse().unwrap();
+        
+        match self.cur_char() {
+        Some(c) if c.is_ascii_alphabetic() => {
+            let suffix = self.get_raw_ident(None)?;
+            let cls = match &suffix[..] {
+                "f32" => super::FloatClass::F32,
+                "f64" => super::FloatClass::F64,
+                _ => todo!("Float suffix: {:?}", suffix),
+                };
+            Ok(Token::Literal(super::Literal::Float(value, Some(cls))))
+            },
+        _ => Ok(Token::Literal(super::Literal::Float(value, None))),
         }
     }
     fn get_raw_ident(&mut self, c1: Option<char>) -> ::std::io::Result<String> {
