@@ -292,7 +292,9 @@ impl<'a, 'b> crate::ast::ExprVisitor for RuleEnumerate<'a, 'b> {
             let Some(value_binding) = value_binding else { panic!("Unresolved Callpath") };
             match value_binding {
             ValueBinding::Local(_) => todo!("call local"),
-            ValueBinding::Function(absolute_path) => {
+            ValueBinding::Function(absolute_path)
+            |ValueBinding::StructValue(absolute_path)
+            |ValueBinding::EnumVariant(absolute_path, _) => {
                 let (ret_ty, arg_tys,is_variadic) = self.lc.functions.get(&absolute_path).unwrap();
                 self.equate_types(&expr.span, &expr.data_ty, ret_ty);
                 if *is_variadic {
@@ -313,8 +315,6 @@ impl<'a, 'b> crate::ast::ExprVisitor for RuleEnumerate<'a, 'b> {
             },
             ValueBinding::Static(absolute_path) => todo!(),
             ValueBinding::Constant(absolute_path) => todo!(),
-            ValueBinding::StructValue(absolute_path) => todo!(),
-            ValueBinding::EnumVariant(absolute_path, _) => todo!(),
             }
         },
         ExprKind::Tuple(exprs) => {
