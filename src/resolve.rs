@@ -70,7 +70,7 @@ fn resolve_mod(lc: &LookupCache, module: &mut crate::ast::items::Module)
                 let vi = enm.variants.iter().enumerate().map(|(i, v)| (v.name.clone(), (i, match v.ty {
                     crate::ast::items::EnumVariantTy::Bare => VariantInfo::Value,
                     crate::ast::items::EnumVariantTy::Value(_) => VariantInfo::Value,
-                    crate::ast::items::EnumVariantTy::Named(_) => VariantInfo::Type,
+                    crate::ast::items::EnumVariantTy::Data(_) => VariantInfo::Type,
                     },),)).collect();
                 item_scope.types.insert(name.clone(), (TypeBinding::Enum(get_ap(name)), Some(vi)));
             },
@@ -137,7 +137,7 @@ fn resolve_mod(lc: &LookupCache, module: &mut crate::ast::items::Module)
                 crate::ast::items::EnumVariantTy::Value(expr_root) => {
                     resolve_expr(&item_scope, expr_root, &mut [])
                     },
-                crate::ast::items::EnumVariantTy::Named(_) => todo!(),
+                crate::ast::items::EnumVariantTy::Data(_) => todo!(),
                 }
             }
         },

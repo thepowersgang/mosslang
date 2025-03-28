@@ -69,10 +69,13 @@ pub struct StructField
 }
 pub struct Union
 {
+    /// Union variants
+    pub variants: Vec<StructField>,
 }
 pub struct Enum
 {
     pub variants: Vec<EnumVariant>,
+    /// Indicates taht the enum doesn't represent all possible values (and that users must consider non-mentioned values)
     pub is_incomplete: bool,
 }
 pub struct EnumVariant
@@ -85,7 +88,7 @@ pub enum EnumVariantTy
 {
     Bare,
     Value(super::expr::ExprRoot),
-    Named(Struct),
+    Data(super::Type),
 }
 
 pub struct Static

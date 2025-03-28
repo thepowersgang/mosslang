@@ -32,7 +32,7 @@ fn expand_module(module: &mut super::ast::items::Module) {
                 crate::ast::items::EnumVariantTy::Value(expr_root) => {
                     expand_expr(expr_root)
                     },
-                crate::ast::items::EnumVariantTy::Named(_) => todo!(),
+                crate::ast::items::EnumVariantTy::Data(_) => todo!(),
                 }
             }
         },

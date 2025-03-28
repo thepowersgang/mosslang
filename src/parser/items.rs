@@ -50,6 +50,14 @@ pub fn parse_module(lex: &mut Lexer, mod_attrs: &mut Vec<crate::ast::Attribute>)
                 attributes,
                 });
         },
+        lex::Token::RWord(lex::ReservedWord::Union) => {
+            let (name, i) = parse_union(lex, &mut attributes)?;
+            rv.items.push(crate::ast::items::Item {
+                name: Some(name),
+                ty: crate::ast::items::ItemType::Union(i),
+                attributes,
+                });
+        },
         lex::Token::RWord(lex::ReservedWord::Struct) => {
             let (name, i) = parse_struct(lex, &mut attributes)?;
             rv.items.push(crate::ast::items::Item {
@@ -158,7 +166,8 @@ fn parse_enum(lex: &mut Lexer, outer_attrs: &mut Vec<crate::ast::Attribute>) -> 
         let name = lex.consume_ident()?;
 
         let ty = if lex.opt_consume_punct(lex::Punct::ParenOpen)? {
-                todo!("data enums");
+                let ty = parse_type(lex)?;
+                crate::ast::items::EnumVariantTy::Data(ty)
             }
             else if lex.opt_consume_punct(lex::Punct::Equals)? {
                 crate::ast::items::EnumVariantTy::Value( parse_root_expr(lex)? )
@@ -181,6 +190,37 @@ fn parse_enum(lex: &mut Lexer, outer_attrs: &mut Vec<crate::ast::Attribute>) -> 
     Ok((name, crate::ast::items::Enum {
         variants,
         is_incomplete,
+    }))
+}
+
+fn parse_union(lex: &mut Lexer, outer_attrs: &mut Vec<crate::ast::Attribute>) -> Result<(crate::Ident,crate::ast::items::Union)> {
+    let name = lex.consume_ident()?;
+    let mut fields = Vec::new();
+    lex.consume_punct(lex::Punct::BraceOpen)?;
+    loop {
+        if let Some(lex::Token::Punct(lex::Punct::BraceClose)) = lex.peek() {
+            break;
+        }
+
+        let attributes = parse_attributes(lex, fields.is_empty().then_some(outer_attrs))?;
+        let name = lex.consume_ident()?;
+        lex.consume_punct(lex::Punct::Colon)?;
+        let ty = parse_type(lex)?;
+        
+        fields.push(crate::ast::items::StructField {
+            attributes,
+            name,
+            ty,
+        });
+
+        if !lex.opt_consume_punct(lex::Punct::Comma)? {
+            break;
+        }
+    }
+
+    lex.consume_punct(lex::Punct::BraceClose)?;
+    Ok((name, crate::ast::items::Union {
+        variants: fields,
     }))
 }
 

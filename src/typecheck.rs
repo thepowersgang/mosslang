@@ -59,14 +59,27 @@ fn enumerate_mod(lc: &mut LookupContext, module: &crate::ast::items::Module, pat
                 fields
             );
         },
-        ItemType::Enum(_enm) => {
+        ItemType::Enum(enm) => {
+            let enm_path = path.append(v.name.as_ref().unwrap().clone());
+            let enm_ty = Type { kind: TypeKind::Named(
+                crate::ast::Path { root: crate::ast::path::Root::Root, components: enm_path.0.clone() },
+                Some(crate::ast::path::TypeBinding::Enum(enm_path.clone()))
+                ) };
+            for variant in &enm.variants {
+                if let crate::ast::items::EnumVariantTy::Data(ty) = &variant.ty {
+                    lc.functions.insert(
+                        enm_path.append(variant.name.clone()),
+                        (enm_ty.clone(), vec![ty.clone()], false)
+                    );
+                }
+            }
         },
-        ItemType::Union(_u) => {
-            //let fields = u.fields.iter().map(|v| (v.name, v.ty.clone())).collect();
-            //lc.fields.insert(
-            //    path.append(v.name.as_ref().unwrap().clone()),
-            //    fields
-            //);
+        ItemType::Union(u) => {
+            let fields = u.variants.iter().map(|v| (v.name.clone(), v.ty.clone())).collect();
+            lc.fields.insert(
+                path.append(v.name.as_ref().unwrap().clone()),
+                fields
+            );
         },
         ItemType::Function(function) => {
             let k = path.append(v.name.as_ref().unwrap().clone());
@@ -111,7 +124,7 @@ fn typecheck_mod(lc: &LookupContext, module: &mut crate::ast::items::Module)
                 crate::ast::items::EnumVariantTy::Value(expr_root) => {
                     typecheck_expr(lc, &ty, expr_root, &mut [])
                     },
-                crate::ast::items::EnumVariantTy::Named(_) => {},
+                crate::ast::items::EnumVariantTy::Data(_) => {},
                 }
             }
         },
