@@ -163,6 +163,8 @@ fn equate_type_kind(ivars: &mut [Type], l: &TypeKind, r: &TypeKind) -> Result<()
     (TypeKind::Void, _) => Err((l.clone(),r.clone())),
     (TypeKind::Bool, TypeKind::Bool) => Ok( () ),
     (TypeKind::Bool, _) => Err((l.clone(),r.clone())),
+    (TypeKind::NullPointer, TypeKind::NullPointer) => Ok( () ),
+    (TypeKind::NullPointer, _) => Err((l.clone(),r.clone())),
     (TypeKind::Integer(ic_l), TypeKind::Integer(ic_r)) if ic_l == ic_r => Ok(()),
     (TypeKind::Integer { .. }, _) => Err((l.clone(),r.clone())),
     (TypeKind::Tuple(inner_l), TypeKind::Tuple(inner_r)) => {

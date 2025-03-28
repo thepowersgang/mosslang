@@ -22,6 +22,7 @@ impl<'a> IvarEnumerate<'a> {
         TypeKind::Named(_, _) => {},
         TypeKind::Void => {},
         TypeKind::Bool => {},
+        TypeKind::NullPointer => {},
 
         TypeKind::Tuple(items) => {
             for t in items {
@@ -41,18 +42,15 @@ impl<'a> IvarEnumerate<'a> {
 impl<'a> crate::ast::ExprVisitor for IvarEnumerate<'a> {
     fn visit_mut_expr(&mut self, expr: &mut crate::ast::expr::Expr) {
         match expr.kind {
-        crate::ast::expr::ExprKind::LiteralInteger(_, crate::ast::expr::IntLitClass::Unspecified) => {
-            expr.data_ty = Type { kind: TypeKind::Infer { kind: crate::ast::ty::InferKind::Integer, index: None }};
+        crate::ast::expr::ExprKind::LiteralInteger(_, ref ty) => match ty {
+            crate::ast::expr::IntLitClass::Unspecified => {
+                expr.data_ty = Type { kind: TypeKind::Infer { kind: crate::ast::ty::InferKind::Integer, index: None }};
             },
-        crate::ast::expr::ExprKind::LiteralInteger(_, crate::ast::expr::IntLitClass::Pointer) => {
-            expr.data_ty = Type::new_ptr(false, expr.data_ty.clone());
+            crate::ast::expr::IntLitClass::Pointer
+            |crate::ast::expr::IntLitClass::Integer(_) => {
+                // Handled later on, as it doesn't need to worry about generating an ivar to be filled
+                },
             },
-        //crate::ast::expr::ExprKind::LiteralInteger(_, crate::ast::expr::IntLitClass::Unspecified) => {
-        //    expr.data_ty = Type { kind: TypeKind::Infer { kind: crate::ast::ty::InferKind::Integer, index: None }};
-        //    },
-        //crate::ast::expr::ExprKind::LiteralInteger(_, crate::ast::expr::IntLitClass::Pointer) => {
-        //    expr.data_ty = Type::new_ptr(false, expr.data_ty.clone());
-        //    },
         crate::ast::expr::ExprKind::Cast(_, ref mut ty) => {
             self.fill_ivars_in(ty);
             }
@@ -126,7 +124,7 @@ impl RuleEnumerate<'_, '_> {
         }
     }
 
-    fn equate_opt_block(&mut self, span: &crate::Span, dst_ty: &Type, block: &Option<crate::ast::expr::Block>) {
+    fn equate_opt_block(&mut self, span: &crate::Span, dst_ty: &Type, block: &mut Option<crate::ast::expr::Block>) {
         if let Some(block) = block {
             self.equate_block(span, dst_ty, block);
         }
@@ -134,9 +132,9 @@ impl RuleEnumerate<'_, '_> {
             self.equate_types(span, dst_ty, &Type::new_unit());
         }
     }
-    fn equate_block(&mut self, span: &crate::Span, dst_ty: &Type, block: &crate::ast::expr::Block) {
-        if let Some(res) = &block.result {
-            self.equate_types(span, dst_ty, &res.data_ty);
+    fn equate_block(&mut self, span: &crate::Span, dst_ty: &Type, block: &mut crate::ast::expr::Block) {
+        if let Some(res) = &mut block.result {
+            self.make_coerce(span, dst_ty.clone(), res);
         }
         else {
             match block.statements.last() {
@@ -226,7 +224,7 @@ impl<'a, 'b> crate::ast::ExprVisitor for RuleEnumerate<'a, 'b> {
         ExprKind::LiteralInteger(_, int_lit_class) => {
             self.equate_types(&expr.span, &expr.data_ty, &match int_lit_class {
                 crate::ast::expr::IntLitClass::Unspecified => return,
-                crate::ast::expr::IntLitClass::Pointer => return,
+                crate::ast::expr::IntLitClass::Pointer => Type { kind: TypeKind::NullPointer },
                 crate::ast::expr::IntLitClass::Integer(int_class) => Type::new_integer(*int_class),
                 });
         }
@@ -388,7 +386,7 @@ impl<'a, 'b> crate::ast::ExprVisitor for RuleEnumerate<'a, 'b> {
             if let Some(res) = &body.result {
                 self.equate_types(&res.span, &Type::new_unit(), &res.data_ty);
             }
-            self.equate_opt_block(&expr.span, &expr.data_ty, &else_block);
+            self.equate_opt_block(&expr.span, &expr.data_ty, else_block);
         },
         ExprKind::ForLoop { pattern, start, end, body, else_block } => {
             self.pattern_assign(pattern, &start.data_ty);
@@ -397,14 +395,14 @@ impl<'a, 'b> crate::ast::ExprVisitor for RuleEnumerate<'a, 'b> {
             if let Some(res) = &body.result {
                 self.equate_types(&res.span, &Type::new_unit(), &res.data_ty);
             }
-            self.equate_opt_block(&expr.span, &expr.data_ty, &else_block);
+            self.equate_opt_block(&expr.span, &expr.data_ty, else_block);
         },
         ExprKind::IfChain { branches, else_block } => {
             for b in branches {
                 self.equate_types(&b.cond.span, &Type::new_bool(), &b.cond.data_ty);
-                self.equate_block(&expr.span, &expr.data_ty, &b.body);
+                self.equate_block(&expr.span, &expr.data_ty, &mut b.body);
             }
-            self.equate_opt_block(&expr.span, &expr.data_ty, &else_block);
+            self.equate_opt_block(&expr.span, &expr.data_ty, else_block);
         },
         ExprKind::Match { value, branches } => {
             for b in branches {

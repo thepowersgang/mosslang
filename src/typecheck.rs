@@ -230,6 +230,9 @@ fn typecheck_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crat
                         }
                         R::Consume
                         },
+                    (TypeKind::Pointer { .. }, TypeKind::NullPointer) => {
+                        R::Consume
+                        },
                     (TypeKind::Pointer { is_const: c_l, inner: i_l }, TypeKind::Pointer { is_const: c_r, inner: i_r }) => {
                         // If the source is a constant pointer, the destination must be a constant
                         if *c_r && !*c_l {

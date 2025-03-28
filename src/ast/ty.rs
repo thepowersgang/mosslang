@@ -76,6 +76,7 @@ impl Type
         },
         TypeKind::Bool => f.write_str("bool"),
         TypeKind::Void => f.write_str("void"),
+        TypeKind::NullPointer => f.write_str("nullptr_t"),
         TypeKind::Integer(int_class) => match int_class
             {
             IntClass::PtrInt => f.write_str("usize"),
@@ -194,19 +195,32 @@ impl Ord for ArraySize {
 #[derive(PartialOrd,Ord,PartialEq,Eq)]
 pub enum TypeKind
 {
+    /// An omitted type
     Infer {
         kind: InferKind,
         index: Option<usize>,
     },
-    Void,   // As opposed to unit, void cannot exist
+    /// A type that cannot exist, used for untyped pointers
+    Void,
+    /// Boolean - Return type of comparison operations, and input for `if`
     Bool,
+    /// Integers
     Integer(IntClass),
+    //Float(FloatClass),
+    /// A tuple - anonymous collection of values
     Tuple(Vec<Type>),
+    /// A named type
     Named(super::Path, Option<super::path::TypeBinding>),
+    /// Type returned by the integer literal `0p`
+    /// 
+    /// Can coerce to any pointer type
+    NullPointer,
+    /// Pointer to data
     Pointer {
         is_const: bool,
         inner: Box<Type>,
     },
+    /// Array (homogenous collection of data)
     Array {
         inner: Box<Type>,
         count: ArraySize,
@@ -215,7 +229,10 @@ pub enum TypeKind
 #[derive(Clone,Debug)]
 #[derive(PartialOrd,Ord,PartialEq,Eq)]
 pub enum InferKind {
+    /// No type-class information available
     None,
+    /// This ivar must be an integer type
     Integer,
+    /// This ivar must be a floating point type
     Float,
 }
