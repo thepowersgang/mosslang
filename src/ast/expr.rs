@@ -49,7 +49,7 @@ pub enum ExprKind
 
     Assign {
         slot: Box<Expr>,
-        op: Option<()>,
+        op: Option<AssignOp>,
         value: Box<Expr>,
     },
 
@@ -62,6 +62,7 @@ pub enum ExprKind
     FieldIndex(Box<Expr>, usize),
     Index(Box<Expr>, Box<Expr>),
 
+    /// is_mut
     Addr(bool, Box<Expr>),
     Deref(Box<Expr>),
     /// Type cast operation
@@ -174,6 +175,24 @@ pub struct IfCondition {
 pub struct MatchArm {
     pub pat: super::Pattern,
     pub val: Expr,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum AssignOp
+{
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Rem,
+
+
+    BitAnd,
+    BitOr,
+    BitXor,
+
+    Shl,
+    Shr,
 }
 
 #[derive(Debug, Clone, Copy)]

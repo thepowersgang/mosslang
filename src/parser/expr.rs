@@ -150,9 +150,10 @@ macro_rules! def_binops {
 }
 // - Assignment
 fn parse_expr_assign(lex: &mut super::Lexer) -> super::Result<e::Expr> {
+    use crate::ast::expr::AssignOp;
     let ps = lex.start_span();
     let lhs = parse_binops_root(lex)?;
-    fn op_equals(lex: &mut super::Lexer, ps: super::lex::ProtoSpan, lhs: e::Expr, op: Option<()>) -> super::Result<e::Expr> {
+    fn op_equals(lex: &mut super::Lexer, ps: super::lex::ProtoSpan, lhs: e::Expr, op: Option<AssignOp>) -> super::Result<e::Expr> {
         lex.consume();
         Ok(e::ExprKind::Assign {
             slot: Box::new(lhs),
@@ -162,8 +163,8 @@ fn parse_expr_assign(lex: &mut super::Lexer) -> super::Result<e::Expr> {
     }
     match lex.peek_no_eof()? {
     Token::Punct(Punct::Equals) => op_equals(lex, ps, lhs, None),
-    Token::Punct(Punct::PlusEquals) => op_equals(lex, ps, lhs, Some(())),
-    Token::Punct(Punct::MinusEquals) => op_equals(lex, ps, lhs, Some(())),
+    Token::Punct(Punct::PlusEquals) => op_equals(lex, ps, lhs, Some(AssignOp::Add)),
+    Token::Punct(Punct::MinusEquals) => op_equals(lex, ps, lhs, Some(AssignOp::Sub)),
     _ => Ok(lhs),
     }
 }
