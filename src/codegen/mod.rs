@@ -2,23 +2,48 @@
 // TODO: What sort of backend? Simple assembly? an IR?
 // Cranelift probably
 use crate::INDENT;
+use crate::ast::path::AbsolutePath;
+use ::std::collections::HashMap;
 
 mod ir;
 
-struct State {
+struct State<'a> {
     ofp: ::std::fs::File,
+    constants: HashMap<AbsolutePath,&'a crate::ast::ExprRoot>,
+    fields: HashMap<AbsolutePath,HashMap<crate::Ident, usize>>,
 }
 
 pub fn generate(output: &::std::path::Path, krate: crate::ast::Crate) -> Result<(),::std::io::Error>
 {
     let mut state = State {
         ofp: ::std::fs::File::create(output)?,
+        constants: Default::default(),
+        fields: Default::default(),
     };
+    fn enum_module<'a>(state: &mut State<'a>, module: &'a crate::ast::items::Module, path: AbsolutePath) {
+        for item in &module.items {
+            use crate::ast::items::ItemType;
+            match item.ty {
+            ItemType::Constant(ref v) => {
+                state.constants.insert(path.append(item.name.clone().unwrap()), &v.value);
+            },
+            ItemType::Struct(ref s) => {
+                let fields = s.fields.iter().enumerate().map(|(i,v)| (v.name.clone(), i)).collect();
+                state.fields.insert(
+                    path.append(item.name.as_ref().unwrap().clone()),
+                    fields
+                );
+            },
+            _ => {},
+            }
+        }
+    }
+    enum_module(&mut state, &krate.module, AbsolutePath(Vec::new()));
     state.visit_module(&krate.module);
     Ok( () )
 }
 
-impl State {
+impl<'a> State<'a> {
     fn visit_module(&mut self, module: &crate::ast::items::Module) {
         for item in &module.items {
             use crate::ast::items::ItemType;

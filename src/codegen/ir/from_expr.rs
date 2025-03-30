@@ -15,13 +15,13 @@ struct Output {
     blocks: Vec<Option<super::Block>>,
 }
 
-pub struct Visitor<'a> {
-    parent: &'a mut super::super::State,
+pub struct Visitor<'a,'b> {
+    parent: &'a mut super::super::State<'b>,
     loop_stack: Vec<LoopEntry>,
     output: Output,
 }
-impl<'a> Visitor<'a> {
-    pub fn new(parent: &'a mut super::super::State, locals: &[crate::ast::Type]) -> Self {
+impl<'a,'b> Visitor<'a,'b> {
+    pub fn new(parent: &'a mut super::super::State<'b>, locals: &[crate::ast::Type]) -> Self {
         let mut rv = Visitor {
             parent,
             loop_stack: Vec::new(),
@@ -102,7 +102,9 @@ impl<'a> Visitor<'a> {
             ValueBinding::Local(i) => Value::Local(super::LocalIndex(*i as _), Default::default()),
             ValueBinding::Function(absolute_path) => todo!("function pointer"),
             ValueBinding::Static(ap) => Value::Named(ap.clone(), Default::default()),
-            ValueBinding::Constant(absolute_path) => todo!("constant"),
+            ValueBinding::Constant(absolute_path) => {
+                self.visit_expr( &self.parent.constants.get(absolute_path).expect("Missing constant?").e )
+            },
             ValueBinding::StructValue(absolute_path) => todo!("function pointer - struct"),
             ValueBinding::EnumVariant(absolute_path, idx) => {
                 // HACK: Assume that the variant isn't a data-holding variant
@@ -135,7 +137,14 @@ impl<'a> Visitor<'a> {
         },
         ExprKind::FieldNamed(expr, ident) => {
             let v = self.visit_expr(expr);
-            todo!("Get field index for {} from {:?}", ident, expr.data_ty);
+            let data_ty = match &expr.data_ty.kind {
+                crate::ast::ty::TypeKind::Named(_, Some(crate::ast::path::TypeBinding::Struct(p))) => p,
+                //crate::ast::ty::TypeKind::Named(_, Some(crate::ast::path::TypeBinding::Union(p))) => p,
+                _ => panic!("Unexpected type for named field - {}", expr.data_ty),
+                };
+            let Some(ty_fields) = self.parent.fields.get(data_ty) else { panic!("Type {} not in fields cache", data_ty) };
+            let Some(&idx) = ty_fields.get(ident) else { panic!() };
+            v.field(idx)
         },
         ExprKind::FieldIndex(expr, _) => todo!(),
         ExprKind::Index(expr_v, expr_i) => {    
@@ -185,8 +194,17 @@ impl<'a> Visitor<'a> {
             Value::Named(absolute_path, wrapper_list.add(super::Wrapper::Deref)),
             }
         },
-        ExprKind::Cast(expr, _) => todo!("lower IR: cast"),
-        ExprKind::Coerce(expr) => todo!("lower IR: coerce"),
+        ExprKind::Cast(val_expr, _) | ExprKind::Coerce(val_expr) => {
+            let v = self.visit_expr(val_expr);
+            use crate::ast::ty::TypeKind;
+            match (&expr.data_ty.kind, &val_expr.data_ty.kind) {
+            (ref t1, ref t2) if t1 == t2 => v,
+            (TypeKind::Void, _) => Value::ImplicitUnit,
+            (TypeKind::Pointer { .. },TypeKind::Pointer { .. }) => v,
+            (TypeKind::Integer { .. },TypeKind::Integer { .. }) => v,   // TODO: Should this use an operation to truncate the value?
+            _ => todo!("lower IR: convert {} to {} - {:?}", val_expr.data_ty, expr.data_ty, v),
+            }
+        },
         ExprKind::UniOp(uni_op_ty, expr) => {
             let rv = self.output.allocate_slot(&expr.data_ty);
             let v = self.visit_expr(expr);

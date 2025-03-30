@@ -79,12 +79,19 @@ enum Wrapper {
     Field(usize),
     IndexBySlot(LocalIndex),
 }
+/// Non-branching operations (aka statements)
 #[derive(Debug)]
 pub enum Operation {
+    /// Assign a value to a local variable
     AssignLocal(LocalIndex, WrapperList, Value),
+    /// Assign a value to a global variable
     AssignNamed(crate::ast::path::AbsolutePath, Value),
     //CreateLiteral(LocalIndex, ),
+    //// Cast a value to a differen type (primitives only)
+    //Cast(LocalIndex, Value),
+    /// Binary operation
     BinOp(LocalIndex, Value, BinOp, Value),
+    /// Unary operation
     UniOp(LocalIndex, UniOp, Value),
     //Compare(LocalIndex, Value, CmpOp, Value),
 }
