@@ -54,17 +54,17 @@ enum Compression {
 
 extern "C" fn main(argc: usize, argv: *const *const c_char) -> i32 {
 
-    let mut input_file = 0p as *const c_char;
-    let mut output_file = 0p as _;
+    let mut input_file = 0p as *const _;
+    let mut output_file = 0p as *const _;
     let mut comp = Compression::Auto;
 
     for i in 1 .. argc {
         if argv[i][0] != b'-' as i8 {
             // Free args
-            if input_file == 0 {
+            if input_file == 0p {
                 input_file = argv[i];
             }
-            else if output_file == 0 {
+            else if output_file == 0p {
                 output_file = argv[i];
             }
             else {
@@ -140,12 +140,12 @@ extern "C" fn main(argc: usize, argv: *const *const c_char) -> i32 {
     let (out_length, out_buffer) = match comp
         {
         Compression::None => {
-            let out_buf = buffer;
-            buffer = 0;
-            (pixel_count*4, buffer)
+            let out_buf = buffer as *mut _;
+            buffer = 0p;
+            (pixel_count*4, out_buf)
             },
         Compression::Rle1x32 => {
-            let mut bufLen = CompressRLE1x32(0p, buffer as *const _,  pixel_count);
+            let mut bufLen = CompressRLE1x32(0p, buffer,  pixel_count);
             let buffer2 = malloc(bufLen);
             bufLen = CompressRLE1x32(buffer2 as *mut _, buffer as *const _, pixel_count);
             (bufLen, buffer2)
@@ -165,7 +165,7 @@ extern "C" fn main(argc: usize, argv: *const *const c_char) -> i32 {
     free(buffer);
 
     let fp = fopen(output_file, "w");
-    if fp == 0 {
+    if fp == 0p {
         perror("Unable to open output");
         return -1;
     }
@@ -274,7 +274,7 @@ fn RLE1_7(dest: *mut u8, src: *const u8, Size: usize, BlockSize: usize, BlockSte
 			}
 			
 			// Save data
-			if dest != 0
+			if dest != 0p
 			{
 				dest[ret] = runlen as u8 | 0x80;	// Length (with high bit set)
                 ret += 1;

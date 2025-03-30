@@ -1,7 +1,34 @@
 use crate::INDENT;
 use crate::ast::ty::{Type,TypeKind};
 
-pub fn get_ivar<'a>(ivars: &'a [Type], mut ty: &'a Type) -> &'a Type
+#[derive(Copy,Clone,Debug)]
+pub enum InferType {
+    None,
+    Integer,
+    Float,
+    Pointer,
+}
+impl InferType {
+    fn to_type_kind(&self) -> TypeKind {
+        match self {
+        InferType::None => unreachable!(),
+        InferType::Float => todo!(),
+        InferType::Integer => TypeKind::Integer(crate::ast::ty::IntClass::Signed(2)),
+        InferType::Pointer => TypeKind::Pointer {is_const: true, inner: Box::new(Type::new_infer()) },
+        }
+    }
+}
+pub struct IVarEnt {
+    pub ty: Type,
+    pub cls: InferType,
+}
+impl IVarEnt {
+    pub fn new() -> Self {
+        IVarEnt { ty: Type::new_infer(), cls: InferType::None }
+    }
+}
+
+pub fn get_ivar<'a>(ivars: &'a [IVarEnt], mut ty: &'a Type) -> &'a Type
 {
     let mut prev_ty = ty;
     let mut seen = ::std::collections::HashSet::new();
@@ -9,12 +36,49 @@ pub fn get_ivar<'a>(ivars: &'a [Type], mut ty: &'a Type) -> &'a Type
         let Some(index) = index else { return prev_ty; };
         assert!( seen.insert(index), "Loop in {} at {}", prev_ty, ty );
         prev_ty = ty;
-        ty = &ivars[index];
+        ty = &ivars[index].ty;
     }
     ty
 }
 
-pub fn equate_types(span: &crate::Span, ivars: &mut [Type], l: &Type, r: &Type)
+pub fn set_ivar_kind(span: &crate::Span, ivars: &mut [IVarEnt], ty: &Type, k: InferType) {
+    println!("{INDENT}set_ivar_kind {ty} = {k:?}");
+    match (&ty.kind,k) {
+    (TypeKind::Infer { index: Some(mut i), .. }, _) => {
+        while let TypeKind::Infer { index: Some(next_i), .. } = ivars[i].ty.kind {
+            ivars[i].cls = k;
+            i = next_i;
+        }
+        println!("{INDENT} _#{i} = {}", ivars[i].ty);
+        if let TypeKind::Infer { index: None, .. } = ivars[i].ty.kind {
+            match (ivars[i].cls, k) {
+            (InferType::None, _) => { ivars[i].cls = k; },
+            (InferType::Integer, InferType::Integer) => {},
+            (InferType::Float, InferType::Float) => {},
+            (InferType::Pointer, InferType::Pointer) => {},
+            _ => panic!("{span}: Setting ivar kind on incompatible known type - {:?} != {:?}", ivars[i].cls, k),
+            }
+        }
+        else {
+            if ! ivar_kind_matches(&ivars[i].ty, k) {
+                panic!("{span}: Setting ivar kind on incompatible known type - {}", ivars[i].ty);
+            }
+        }
+        },
+    _ if ivar_kind_matches(ty, k) => {},
+    _ => panic!("{span}: Setting ivar kind on incompatible known type - {}", ty),
+    }
+}
+fn ivar_kind_matches(ty: &Type, k: InferType) -> bool {
+    match (&ty.kind,k) {
+    (_, InferType::None) => true,
+    (TypeKind::Integer(..), InferType::Integer) => true,
+    (TypeKind::Pointer { .. }, InferType::Pointer) => true,
+    _ => false,
+    }
+}
+
+pub fn equate_types(span: &crate::Span, ivars: &mut [IVarEnt], l: &Type, r: &Type)
 {
     match equate_types_inner(ivars, l, r)
     {
@@ -25,7 +89,7 @@ pub fn equate_types(span: &crate::Span, ivars: &mut [Type], l: &Type, r: &Type)
     }
 }
 
-struct FmtWithIvars<'a>(&'a [Type],&'a Type);
+struct FmtWithIvars<'a>(&'a [IVarEnt],&'a Type);
 impl<'a> ::std::fmt::Display for FmtWithIvars<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let ty = get_ivar(self.0, self.1);
@@ -62,20 +126,20 @@ impl<'a> ::std::fmt::Display for FmtWithIvars<'a> {
     }
 }
 
-fn equate_types_inner(ivars: &mut [Type], l: &Type, r: &Type) -> Result<(),(TypeKind,TypeKind)>
+fn equate_types_inner(ivars: &mut [IVarEnt], l: &Type, r: &Type) -> Result<(),(TypeKind,TypeKind)>
 {
     let _i = INDENT.inc_f("equate_types", format_args!("{:?},{:?}", l, r));
     match (&l.kind, &r.kind) {
     (TypeKind::Infer { index: i1, .. }, TypeKind::Infer { index: i2, .. }) => {
         let mut i1 = i1.expect("Unspecified ivar");
         let mut i2 = i2.expect("Unspecified ivar");
-        while let TypeKind::Infer { index: Some(i), .. } = ivars[i1].kind {
-            assert!(i2 != i, "Recursion at {:?}", ivars[i1]);
+        while let TypeKind::Infer { index: Some(i), .. } = ivars[i1].ty.kind {
+            assert!(i2 != i, "Recursion at {:?}", ivars[i1].ty);
             println!("{INDENT}equate_types: #{} -> {}", i1, i);
             i1 = i;
         }
-        while let TypeKind::Infer { index: Some(i), .. } = ivars[i2].kind {
-            assert!(i2 != i, "Recursion at {:?}", ivars[i2]);
+        while let TypeKind::Infer { index: Some(i), .. } = ivars[i2].ty.kind {
+            assert!(i2 != i, "Recursion at {:?}", ivars[i2].ty);
             println!("{INDENT}equate_types: {} -> {}", i2, i);
             i2 = i;
         }
@@ -90,72 +154,87 @@ fn equate_types_inner(ivars: &mut [Type], l: &Type, r: &Type) -> Result<(),(Type
                 let (a,b) = ivars.split_at_mut(i1);
                 (&mut b[0], &mut a[i2], )
             };
-        println!("{INDENT}equate_types(i-i): #{} {:?} = #{} {:?}", i1, t1, i2, t2);
-        if let TypeKind::Infer { index: ref mut idx @ None, .. } = t1.kind {
-            if let TypeKind::Infer { index: None, .. } = t2.kind {
+        
+        println!("{INDENT}equate_types(i-i): #{} {:?} = #{} {:?}", i1, t1.ty, i2, t2.ty);
+        if let TypeKind::Infer { index: ref mut idx @ None, .. } = t1.ty.kind {
+            if let TypeKind::Infer { index: None, .. } = t2.ty.kind {
                 println!("{INDENT}equate_types(): IVar #{i1} = @#{i2}");
+                match (t1.cls, t2.cls) {
+                (InferType::None, InferType::None) => {},
+                (InferType::Integer, InferType::Integer) => {},
+                (InferType::Float, InferType::Float) => {},
+                (ref mut dst @ InferType::None, i) => *dst = i,
+                (i, ref mut dst @ InferType::None) => *dst = i,
+                _ => return Err(( t1.cls.to_type_kind(), t2.cls.to_type_kind(), )),
+                }
                 *idx = Some(i2);
                 Ok(())
             }
             else {
                 // Shouldn't be an infer, so we can just assign into `t1`
-                println!("{INDENT}equate_types(): IVar #{i1} = {:?}", t2);
-                *t1 = t2.clone();
+                println!("{INDENT}equate_types(): IVar #{i1} = {:?}", t2.ty);
+                if !ivar_kind_matches(&t2.ty, t1.cls) {
+                    return Err(( t2.ty.kind.clone(), t1.cls.to_type_kind(), ));
+                }
+                t1.ty = t2.ty.clone();
                 Ok(())
             }
         }
         else {
-            if let TypeKind::Infer { index: None, .. } = t2.kind {
-                println!("{INDENT}equate_types(): IVar #{i2} = {:?}", t1);
-                *t2 = t1.clone();
+            if let TypeKind::Infer { index: None, .. } = t2.ty.kind {
+                println!("{INDENT}equate_types(): IVar #{i2} = {:?}", t1.ty);
+                if !ivar_kind_matches(&t1.ty, t2.cls) {
+                    return Err(( t1.ty.kind.clone(), t2.cls.to_type_kind(), ));
+                }
+                t2.ty = t1.ty.clone();
                 Ok(())
             }
             else {
                 // Check the types are equal
-                let t1 = t1.kind.clone();
-                let t2 = t2.kind.clone();
+                let t1 = t1.ty.kind.clone();
+                let t2 = t2.ty.kind.clone();
                 equate_type_kind(ivars, &t1, &t2)
             }
         }
         },
     (TypeKind::Infer { index, .. }, _) => {
         let mut i1 = index.expect("Unspecified ivar");
-        while let TypeKind::Infer { index: Some(i), .. } = ivars[i1].kind {
+        while let TypeKind::Infer { index: Some(i), .. } = ivars[i1].ty.kind {
             i1 = i;
         }
         let t1 = &mut ivars[i1];
-        println!("{INDENT}equate_types(i-c): #{} {:?} = {:?}", i1, t1, r);
-        if let TypeKind::Infer { index: None, .. } = t1.kind {
+        println!("{INDENT}equate_types(i-c): #{} {:?} = {:?}", i1, t1.ty, r);
+        if let TypeKind::Infer { index: None, .. } = t1.ty.kind {
             println!("{INDENT}equate_types(): IVar #{i1} = {:?}", r);
-            *t1 = r.clone();
+            t1.ty = r.clone();
             Ok(())
         }
         else {
-            let v = t1.kind.clone();
+            let v = t1.ty.kind.clone();
             equate_type_kind(ivars, &v, &r.kind)
         }
     },
     (_, TypeKind::Infer { index, .. }) => {
         let mut i2 = index.expect("Unspecified ivar");
-        while let TypeKind::Infer { index: Some(i), .. } = ivars[i2].kind {
+        while let TypeKind::Infer { index: Some(i), .. } = ivars[i2].ty.kind {
             i2 = i;
         }
         let t2 = &mut ivars[i2];
-        println!("{INDENT}equate_types(c-i): {:?} = #{} {:?}", l, i2, t2);
-        if let TypeKind::Infer { index: None, .. } = t2.kind {
+        println!("{INDENT}equate_types(c-i): {:?} = #{} {:?}", l, i2, t2.ty);
+        if let TypeKind::Infer { index: None, .. } = t2.ty.kind {
             println!("{INDENT}equate_types(): IVar #{i2} = {:?}", l);
-            *t2 = l.clone();
+            t2.ty = l.clone();
             Ok( () )
         }
         else {
-            let v = t2.kind.clone();
+            let v = t2.ty.kind.clone();
             equate_type_kind(ivars, &l.kind, &v)
         }
     },
     _ => equate_type_kind(ivars, &l.kind, &r.kind),
     }
 }
-fn equate_type_kind(ivars: &mut [Type], l: &TypeKind, r: &TypeKind) -> Result<(),(TypeKind,TypeKind)>
+fn equate_type_kind(ivars: &mut [IVarEnt], l: &TypeKind, r: &TypeKind) -> Result<(),(TypeKind,TypeKind)>
 {
     match (l,r) {
     (TypeKind::Infer { .. }, _) => panic!(),

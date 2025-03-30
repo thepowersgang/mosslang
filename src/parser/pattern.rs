@@ -30,8 +30,8 @@ fn parse_pattern_inner(lex: &mut Lexer, mut bindings: Vec<PatternBinding>) -> Re
         else {
             match p.into_trivial()
             {
-            Ok(i) => Pattern { span: lex.end_span(&ps), bindings, ty: PatternTy::MaybeBind(i) },
-            Err(p) => Pattern { span: lex.end_span(&ps), bindings, ty: PatternTy::NamedValue(p, None) },
+            Ok(i) => Pattern { span: lex.end_span(&ps), bindings, ty: PatternTy::MaybeBind(i), data_ty: crate::ast::Type::new_infer() },
+            Err(p) => Pattern { span: lex.end_span(&ps), bindings, ty: PatternTy::NamedValue(p, None), data_ty: crate::ast::Type::new_infer()  },
             }
         }
     }
@@ -51,6 +51,7 @@ fn parse_pattern_inner(lex: &mut Lexer, mut bindings: Vec<PatternBinding>) -> Re
             span: lex.end_span(&ps),
             bindings,
             ty: PatternTy::Tuple(pats),
+            data_ty: crate::ast::Type::new_infer(),
         }
     }
     else if lex.opt_consume_rword(lex::ReservedWord::Mut)? {
@@ -59,7 +60,7 @@ fn parse_pattern_inner(lex: &mut Lexer, mut bindings: Vec<PatternBinding>) -> Re
             return parse_pattern_inner(lex, bindings);
         }
         else {
-            Pattern { span: lex.end_span(&ps), bindings, ty: PatternTy::Any }
+            Pattern { span: lex.end_span(&ps), bindings, ty: PatternTy::Any, data_ty: crate::ast::Type::new_infer()  }
         }
     }
     else {

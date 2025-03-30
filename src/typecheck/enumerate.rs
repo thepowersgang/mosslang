@@ -2,21 +2,21 @@ use crate::INDENT;
 use crate::ast::path::{AbsolutePath,ValueBinding};
 use crate::ast::ty::{Type,TypeKind};
 use super::Revisit;
-use super::ivars::equate_types;
+use super::ivars::{equate_types,set_ivar_kind};
 
 pub struct IvarEnumerate<'a> {
-    ivars: &'a mut Vec<crate::ast::Type>,
+    ivars: &'a mut Vec<super::ivars::IVarEnt>,
 }
 impl<'a> IvarEnumerate<'a> {
-    pub fn new(ivars: &'a mut Vec<crate::ast::Type>) -> Self {
+    pub fn new(ivars: &'a mut Vec<super::ivars::IVarEnt>) -> Self {
         IvarEnumerate { ivars }
     }
     pub fn fill_ivars_in(&mut self, ty: &mut crate::ast::Type) {
         match &mut ty.kind {
-        TypeKind::Infer { index, kind: _ } => {
+        TypeKind::Infer { index, kind } => {
             if index.is_none() {
                 *index = Some(self.ivars.len());
-                self.ivars.push(crate::ast::Type::new_infer());
+                self.ivars.push(super::ivars::IVarEnt::new());
             }
         },
         TypeKind::Integer(_int_class) => {},
@@ -60,6 +60,21 @@ impl<'a> crate::ast::ExprVisitor for IvarEnumerate<'a> {
         self.fill_ivars_in(&mut expr.data_ty);
         crate::ast::visit_mut_expr(self, expr);
     }
+    
+    fn visit_mut_pattern(&mut self, pat: &mut crate::ast::Pattern, refutable: bool) {
+        match &mut pat.ty {
+        crate::ast::PatternTy::Any => {},
+        crate::ast::PatternTy::MaybeBind(_) => {}
+        crate::ast::PatternTy::NamedValue(..) => {}
+        crate::ast::PatternTy::Tuple(patterns) => {
+            pat.data_ty = Type::new_tuple(vec![Type::new_infer(); patterns.len()]);
+            self.fill_ivars_in(&mut pat.data_ty);
+            for pat in patterns {
+                self.visit_mut_pattern(pat, refutable);
+            }
+        }
+        }
+    }
 
     fn visit_mut_block(&mut self, block: &mut crate::ast::expr::Block) {
         for s in &mut block.statements {
@@ -81,7 +96,7 @@ impl<'a> crate::ast::ExprVisitor for IvarEnumerate<'a> {
 }
 
 pub struct RuleEnumerate<'a, 'b> {
-    pub ivars: &'a mut [crate::ast::Type],
+    pub ivars: &'a mut [super::ivars::IVarEnt],
     pub rules: &'a mut super::Rules,
     pub lc: &'b super::LookupContext,
     pub ret_ty: &'b crate::ast::Type,
@@ -121,7 +136,13 @@ impl RuleEnumerate<'_, '_> {
                 };
             self.equate_types(&pattern.span, t, ty);
         },
-        crate::ast::PatternTy::Tuple(patterns) => todo!("Handle tuple patterns, create a new tuple type with ivars?"),
+        crate::ast::PatternTy::Tuple(patterns) => {
+            self.equate_types(&pattern.span, &pattern.data_ty, ty);
+            let TypeKind::Tuple(tys) = &pattern.data_ty.kind else { panic!() };
+            for (ty, pat) in Iterator::zip(tys.iter(), patterns.iter()) {
+                self.pattern_assign(pat, ty);
+            }
+        },
         }
     }
 
@@ -174,7 +195,7 @@ impl RuleEnumerate<'_, '_> {
 }
 impl<'a, 'b> crate::ast::ExprVisitor for RuleEnumerate<'a, 'b> {
     fn visit_mut_expr(&mut self, expr: &mut crate::ast::expr::Expr) {
-        let _i = INDENT.inc_f("visit_expr", format_args!("{:?}", &expr.kind));
+        let _i = INDENT.inc_f("visit_expr", format_args!("{:?} -> {}", &expr.kind, expr.data_ty));
 
         // Loops need some special handling for `break`
         match &mut expr.kind {
@@ -223,11 +244,12 @@ impl<'a, 'b> crate::ast::ExprVisitor for RuleEnumerate<'a, 'b> {
             self.equate_types(&expr.span, &expr.data_ty, &Type::new_ptr(true, Type::new_integer(crate::ast::ty::IntClass::Signed(0))));
         },
         ExprKind::LiteralInteger(_, int_lit_class) => {
-            self.equate_types(&expr.span, &expr.data_ty, &match int_lit_class {
-                crate::ast::expr::IntLitClass::Unspecified => return,
-                crate::ast::expr::IntLitClass::Pointer => Type { kind: TypeKind::NullPointer },
-                crate::ast::expr::IntLitClass::Integer(int_class) => Type::new_integer(*int_class),
-                });
+            use crate::ast::expr::IntLitClass;
+            match int_lit_class {
+            IntLitClass::Unspecified => set_ivar_kind(&expr.span, self.ivars, &expr.data_ty, super::ivars::InferType::Integer),
+            IntLitClass::Pointer     => set_ivar_kind(&expr.span, self.ivars, &expr.data_ty, super::ivars::InferType::Pointer),
+            IntLitClass::Integer(int_class) => self.equate_types(&expr.span, &expr.data_ty, &Type::new_integer(*int_class)),
+            }
         }
         ExprKind::Return(value) => {
             if let Some(expr) = value {
@@ -421,9 +443,16 @@ impl<'a, 'b> crate::ast::ExprVisitor for RuleEnumerate<'a, 'b> {
     fn visit_mut_block(&mut self, block: &mut crate::ast::expr::Block) {
         for s in &mut block.statements {
             match s {
-            crate::ast::expr::Statement::Expr(e) => self.visit_mut_expr(e),
+            crate::ast::expr::Statement::Expr(e) => {
+                self.visit_mut_expr(e);
+                // Coerce to void, discarding the value?
+                self.make_coerce(&e.span.clone(), Type::new_void(), e);
+                // Or coerce to unit
+                //self.make_coerce(&e.span.clone(), Type::new_unit(), e);
+            },
             crate::ast::expr::Statement::Let(pattern, ty, expr) => {
                 self.visit_mut_pattern(pattern, false);
+                self.pattern_assign(pattern, ty);
                 if let Some(expr) = expr {
                     self.visit_mut_expr(expr);
                     self.equate_types(&expr.span, ty, &expr.data_ty);

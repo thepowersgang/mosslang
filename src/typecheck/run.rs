@@ -9,6 +9,7 @@ use super::ivars::{equate_types,get_ivar};
 /// Run type-checking on an expression
 pub(super) fn typecheck_expr(lc: &super::LookupContext, ret_ty: &crate::ast::Type, expr: &mut crate::ast::ExprRoot, args: &mut [(crate::ast::Pattern, crate::ast::Type)])
 {
+    let _i = INDENT.inc("typecheck_expr");
     let root_span = expr.e.span.clone();
     // Enumerate ivars
     let mut ivars = Vec::new();
@@ -47,7 +48,7 @@ pub(super) fn typecheck_expr(lc: &super::LookupContext, ret_ty: &crate::ast::Typ
     // Run solver
     for pass_num in 0 .. {
         for (i,ty) in ivars.iter().enumerate() {
-            println!("{INDENT} _#{} = {}", i, ty);
+            println!("{INDENT} _#{} = {}", i, ty.ty);
         }
         if rules.revisits.is_empty() {
             break;
@@ -65,7 +66,7 @@ pub(super) fn typecheck_expr(lc: &super::LookupContext, ret_ty: &crate::ast::Typ
                 if v.len() == 0 {
                     continue;
                 }
-                let TypeKind::Infer { index: None, .. } = ivars[*idx].kind else {
+                let TypeKind::Infer { index: None, .. } = ivars[*idx].ty.kind else {
                     // Known
                     v.clear();
                     continue;
@@ -126,7 +127,7 @@ enum R {
     Keep,
     Consume,
 }
-fn check_revisit(ir: &mut IvarRules, lc: &super::LookupContext, ivars: &mut [Type], span: &crate::Span, dst_ty: &Type, op: &Revisit) -> R
+fn check_revisit(ir: &mut IvarRules, lc: &super::LookupContext, ivars: &mut [super::ivars::IVarEnt], span: &crate::Span, dst_ty: &Type, op: &Revisit) -> R
 {
     match op {
     Revisit::Coerce(src_ty) => {
@@ -195,6 +196,9 @@ fn check_revisit(ir: &mut IvarRules, lc: &super::LookupContext, ivars: &mut [Typ
                 R::Consume
             }
             }
+            },
+        (TypeKind::Void, _) => {
+            R::Consume
             },
         _ => {
             equate_types(span, ivars, dst_ty, src_ty);
