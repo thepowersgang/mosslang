@@ -72,27 +72,38 @@ impl<'a,'b> Visitor<'a,'b> {
         ExprKind::Assign { slot, op, value } => {
             let v_slot = self.visit_expr(slot);
             let v_value = self.visit_expr(value);
-            match op {
-            Some(_) => todo!("op-assign"),
-            None => match v_slot {
-                Value::Unreachable => Value::Unreachable,
-                Value::StringLiteral(_) => panic!("Type error: Assigning to string literal"),
-                Value::IntegerLiteral(_) => panic!("Type error: Assigning to integer literal"),
-                Value::ImplicitUnit => panic!("Type error: Assigning to unit"),
-                Value::Local(local_index, wrapper_list) => {
-                    self.output.push_stmt(Operation::AssignLocal(local_index, wrapper_list, v_value));
-                    Value::ImplicitUnit
-                    },
-                Value::Named(absolute_path, wrapper_list) => {
-                    if wrapper_list.is_empty() {
-                        self.output.push_stmt(Operation::AssignNamed(absolute_path, v_value));
-                    }
-                    else {
-                        todo!("Assign to a named deref?")
-                    }
-                    Value::ImplicitUnit
-                    },
+            let v_value = match op {
+                None => v_value,
+                Some(op) => {
+                    use crate::ast::expr::AssignOp;
+                    let rv = self.output.allocate_slot(&slot.data_ty);
+                    let op = match op {
+                        AssignOp::Add => super::BinOp::Add,
+                        AssignOp::Sub => super::BinOp::Sub,
+                        _ => todo!("op-assign {:?}", op),
+                        };
+                    self.output.push_stmt(Operation::BinOp(rv, v_slot.clone(), op, v_value));
+                    Value::Local(rv, Default::default())
+                },
+                };
+            match v_slot {
+            Value::Unreachable => Value::Unreachable,
+            Value::StringLiteral(_) => panic!("Type error: Assigning to string literal"),
+            Value::IntegerLiteral(_) => panic!("Type error: Assigning to integer literal"),
+            Value::ImplicitUnit => panic!("Type error: Assigning to unit"),
+            Value::Local(local_index, wrapper_list) => {
+                self.output.push_stmt(Operation::AssignLocal(local_index, wrapper_list, v_value));
+                Value::ImplicitUnit
+                },
+            Value::Named(absolute_path, wrapper_list) => {
+                if wrapper_list.is_empty() {
+                    self.output.push_stmt(Operation::AssignNamed(absolute_path, v_value));
                 }
+                else {
+                    todo!("Assign to a named deref?")
+                }
+                Value::ImplicitUnit
+                },
             }
         },
         ExprKind::NamedValue(path, binding) => {
@@ -132,8 +143,10 @@ impl<'a,'b> Visitor<'a,'b> {
             Value::Local(rv, Default::default())
         },
         ExprKind::Tuple(exprs) => {
+            let rv = self.output.allocate_slot(&expr.data_ty);
             let a: Vec<_> = exprs.iter().map(|e| self.visit_expr(e)).collect();
-            todo!()
+            self.output.push_stmt(super::Operation::CreateComposite(rv, None, a));
+            Value::Local(rv, Default::default())
         },
         ExprKind::FieldNamed(expr, ident) => {
             let v = self.visit_expr(expr);
@@ -180,7 +193,45 @@ impl<'a,'b> Visitor<'a,'b> {
                 },
             }
         },
-        ExprKind::Addr(_, expr) => todo!(),
+        ExprKind::Addr(is_mut, val_expr) => {
+            let v = self.visit_expr(val_expr);
+            match v {
+            Value::Unreachable => Value::Unreachable,
+            Value::ImplicitUnit => todo!("Borrow of an ImplicitUnit?"),
+            Value::Local(local_index, wrapper_list) => {
+                todo!("Borrow a local variable");
+                #[cfg(any())]
+                match wrapper_list.split_at_last_deref() {
+                Ok( (pre,post) ) => {
+                    if post.is_empty() {
+                        Value::Local(local_index, pre)
+                    }
+                    else {
+                        let tmp = self.output.allocate_slot(/*todo*/);
+                        self.output.push_stmt(Operation::AssignLocal(tmp, Default::default(), Value::Local(local_index, pre)));
+                        let rv = self.output.allocate_slot(&expr.data_ty);
+                        self.output.push_stmt(Operation::BorrowLocal(rv, *is_mut, tmp, post));
+                        Value::Local(rv, Default::default())
+                    }
+                },
+                Err(wrapper_list) => {
+                    let rv = self.output.allocate_slot(&expr.data_ty);
+                    self.output.push_stmt(Operation::BorrowLocal(rv, *is_mut, local_index, wrapper_list));
+                    Value::Local(rv, Default::default())
+                }
+                }
+            },
+            Value::Named(absolute_path, wrapper_list) => todo!(),
+            
+            Value::StringLiteral(_) | Value::IntegerLiteral(_) => {
+                let tmp = self.output.allocate_slot(&val_expr.data_ty);
+                self.output.push_stmt(Operation::AssignLocal(tmp, Default::default(), v));
+                let rv = self.output.allocate_slot(&expr.data_ty);
+                self.output.push_stmt(Operation::BorrowLocal(rv, *is_mut, tmp, Default::default()));
+                Value::Local(rv, Default::default())
+            },
+            }
+        },
         ExprKind::Deref(expr) => {
             let v = self.visit_expr(expr);
             match v {
@@ -202,7 +253,7 @@ impl<'a,'b> Visitor<'a,'b> {
             (TypeKind::Void, _) => Value::ImplicitUnit,
             (TypeKind::Pointer { .. },TypeKind::Pointer { .. }) => v,
             (TypeKind::Integer { .. },TypeKind::Integer { .. }) => v,   // TODO: Should this use an operation to truncate the value?
-            _ => todo!("lower IR: convert {} to {} - {:?}", val_expr.data_ty, expr.data_ty, v),
+            _ => todo!("{}: lower IR: convert {} to {} - {:?}", expr.span, val_expr.data_ty, expr.data_ty, v),
             }
         },
         ExprKind::UniOp(uni_op_ty, expr) => {
@@ -379,7 +430,32 @@ impl<'a,'b> Visitor<'a,'b> {
             self.output.start_block(bb_exit);
             Value::Local( res_slot, Default::default() )
         },
-        ExprKind::Match { value, branches } => todo!("match"),
+        ExprKind::Match { value, branches } => {
+
+            // 1. Parse the patterns into a form that can be used to generate efficient code
+            // - And do exhaustiveness checking
+
+            let value = self.visit_expr(value);
+            let res_slot = self.output.allocate_slot(&expr.data_ty);
+            let bb_exit = self.output.new_block();
+            for b in branches {
+                let bb_body = self.output.new_block();
+                let bb_next = self.output.new_block();
+                self.match_pattern(&b.pat, value.clone(), bb_body, bb_next);
+
+                self.output.start_block(bb_body);
+                self.destructure_pattern(&b.pat, value.clone());
+                let v = self.visit_expr(&b.val);
+                self.output.push_stmt(Operation::AssignLocal(res_slot, Default::default(), v));
+                self.output.end_block(Terminator::Goto(bb_exit));
+
+                self.output.start_block(bb_next);
+            }
+            self.output.end_block(Terminator::Unreachable);
+
+            self.output.start_block(bb_exit);
+            Value::Local( res_slot, Default::default() )
+        },
         }
     }
     fn visit_expr_block(&mut self, block: &crate::ast::expr::Block) -> super::Value {
@@ -404,6 +480,44 @@ impl<'a,'b> Visitor<'a,'b> {
         }
     }
 
+    fn match_pattern(&mut self, pattern: &crate::ast::Pattern, value: super::Value, bb_true: super::BlockIndex, bb_false: super::BlockIndex) {
+        use crate::ast::PatternTy;
+        match &pattern.ty {
+        PatternTy::MaybeBind(_) => unreachable!("Should have been resolved"),
+        PatternTy::Any => {},
+        PatternTy::NamedValue(_, binding) => {
+            let Some(binding) = binding else { unreachable!("Should have been resolved") };
+            use crate::ast::path::ValueBinding;
+            match binding {
+            ValueBinding::Local(_) => todo!("Can't match to a local?"),
+            ValueBinding::Function(_) => todo!("Can't match to a function."),
+            ValueBinding::Static(_) => panic!("{span}: Attempting to match against a static", span=pattern.span),
+            ValueBinding::StructValue(_) => {},
+            ValueBinding::Constant(absolute_path) => {
+                let cv = self.visit_expr( &self.parent.constants.get(absolute_path).expect("Missing constant?").e );
+                self.output.end_block(super::Terminator::Compare(value, super::CmpOp::Eq, cv,  bb_true, bb_false));
+                return ;
+            },
+            ValueBinding::EnumVariant(_, var_idx) => {
+                // Get the enum variant index
+                //TODO: The below is only valid for non-data enums
+                // Compare against this index
+                self.output.end_block(super::Terminator::Compare(value, super::CmpOp::Eq, super::Value::IntegerLiteral(*var_idx as u128),  bb_true, bb_false));
+                return ;
+            },
+            }
+        },
+        PatternTy::Tuple(patterns) => {
+            for (i,sp) in patterns.iter().enumerate() {
+                let bb_next = self.output.new_block();
+                self.match_pattern(sp, value.field(i), bb_next, bb_false);
+                self.output.start_block(bb_next);
+            }
+            },
+        }
+        self.output.end_block(super::Terminator::Goto(bb_true))
+
+    }
     fn destructure_pattern(&mut self, pattern: &crate::ast::Pattern, value: super::Value) {
         use crate::ast::PatternTy;
         match &pattern.ty {
@@ -479,6 +593,7 @@ impl Output {
         assert!(self.cur_block != usize::MAX, "Pushing with no open block");
         self.cur_block_stmts.push(stmt);
     }
+    #[track_caller]
     fn end_block(&mut self, terminator: super::Terminator) {
         println!("{INDENT}end_block: {terminator:?}");
         assert!(self.cur_block != usize::MAX);
