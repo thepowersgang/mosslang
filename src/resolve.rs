@@ -347,6 +347,7 @@ fn resolve_expr(item_scope: &ItemScope, expr: &mut crate::ast::ExprRoot, args: &
                 *binding = Some(self.resolve_path_value(p));
                 println!("{INDENT}NamedValue: {:?} = {:?} @ {:p}", p, binding.as_ref().unwrap(), expr_p);
                 },
+            ExprKind::Cast(_, ty) => resolve_type(self.item_scope, ty),
             _ => {},
             }
             // Special case for blocks that generate scopes without being blocks

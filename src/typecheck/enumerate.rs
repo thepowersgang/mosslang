@@ -1,7 +1,8 @@
 use crate::INDENT;
 use crate::ast::path::{AbsolutePath,ValueBinding};
 use crate::ast::ty::{Type,TypeKind};
-use super::{equate_types,Revisit};
+use super::Revisit;
+use super::ivars::equate_types;
 
 pub struct IvarEnumerate<'a> {
     ivars: &'a mut Vec<crate::ast::Type>,
