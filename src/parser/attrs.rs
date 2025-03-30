@@ -35,8 +35,17 @@ fn parse_attr(lex: &mut Lexer) -> Result<crate::ast::Attribute> {
             let s = lex.consume_string()?;
             crate::ast::AttributeData::Value(s)
         }
-        //else if lex.opt_consume_punct(lex::Punct::ParenOpen) {
-        //}
+        else if lex.opt_consume_punct(lex::Punct::ParenOpen)? {
+            let mut items = Vec::new();
+            while ! lex.opt_consume_punct(lex::Punct::ParenClose)? {
+                items.push( parse_attr(lex)? );
+                if !lex.opt_consume_punct(lex::Punct::Comma)? {
+                    lex.consume_punct(lex::Punct::ParenClose)?;
+                    break ;
+                }
+            }
+            crate::ast::AttributeData::SubItems(items)
+        }
         else {
             // No data
             crate::ast::AttributeData::None
