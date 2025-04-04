@@ -334,13 +334,18 @@ impl<'a,'b> Visitor<'a,'b> {
             BinOpTy::Gt        => cmp(self, rv, expr_l, super::CmpOp::Gt, expr_r),
             BinOpTy::GtEquals  => cmp(self, rv, expr_l, super::CmpOp::Ge, expr_r),
 
-            BinOpTy::BoolAnd => todo!(),
-            BinOpTy::BoolOr  => {
+            BinOpTy::BoolOr|BinOpTy::BoolAnd => {
                 let bb_true = self.output.new_block();
                 let bb_alt = self.output.new_block();
                 let bb_false = self.output.new_block();
                 let bb_exit = self.output.new_block();
-                self.apply_if(expr_l, bb_true, bb_alt);
+
+                if let BinOpTy::BoolAnd = *bin_op_ty {
+                    self.apply_if(expr_l, bb_alt, bb_false);
+                }
+                else {
+                    self.apply_if(expr_l, bb_true, bb_alt);
+                }
                 
                 self.output.start_block(bb_alt);
                 self.apply_if(expr_r, bb_true, bb_false);
@@ -376,7 +381,39 @@ impl<'a,'b> Visitor<'a,'b> {
             self.output.start_block(bb_exit);
             Value::Local( self.loop_stack.pop().unwrap().break_slot, Default::default() )
         },
-        ExprKind::WhileLoop { cond, body, else_block } => todo!("while loop"),
+        ExprKind::WhileLoop { cond, body, else_block } => {
+            let break_slot = self.output.allocate_slot(&expr.data_ty);
+
+            let bb_head = self.output.new_block(); // No args?
+            let bb_body = self.output.new_block();
+            let bb_else = self.output.new_block();
+            let bb_exit = self.output.new_block();
+            self.output.end_block(Terminator::Goto(bb_head));
+            self.output.start_block(bb_head);
+            self.apply_if(cond, bb_body, bb_else);
+            
+            self.loop_stack.push(LoopEntry {
+                head: bb_head,
+                exit: bb_exit,
+                break_slot,
+            });
+            
+            self.output.start_block(bb_body);
+            self.visit_expr_block(body);
+            self.output.end_block(Terminator::Goto(bb_head));
+
+            self.output.start_block(bb_else);
+            if let Some(else_block) = else_block {
+                self.visit_expr_block(else_block);
+            }
+            else {
+                self.output.push_stmt(Operation::AssignLocal(break_slot, Default::default(), Value::ImplicitUnit));
+            }
+            self.output.end_block(Terminator::Goto(bb_exit));
+
+            self.output.start_block(bb_exit);
+            Value::Local( break_slot, Default::default() )
+        },
         ExprKind::ForLoop { pattern, start, end, body, else_block } => {
             let slot_it_value = self.output.allocate_slot(&start.data_ty);
             let start_value = self.visit_expr(start);
@@ -619,7 +656,7 @@ impl Output {
     #[track_caller]
     fn end_block(&mut self, terminator: super::Terminator) {
         println!("{INDENT}end_block: {terminator:?}");
-        assert!(self.cur_block != usize::MAX);
+        assert!(self.cur_block != usize::MAX, "end_block with closed block");
         self.blocks[self.cur_block] = Some(super::Block {
             statements: ::std::mem::take(&mut self.cur_block_stmts),
             terminator,
