@@ -64,9 +64,12 @@ pub enum ValueBinding
     Function(AbsolutePath),
     Static(AbsolutePath),
     Constant(AbsolutePath),
+    /// Constructor for a tuple-like struct
     StructValue(AbsolutePath),
-    /// Enum value (either a value, or a function pointer)
-    EnumVariant(AbsolutePath, usize)
+    /// Enum value - convertable to integer
+    ValueEnumVariant(AbsolutePath, usize),
+    /// Enum value - function pointer
+    DataEnumVariant(AbsolutePath, usize),
 }
 #[derive(Clone, Debug)]
 #[derive(PartialOrd,Ord,PartialEq,Eq)]
@@ -75,6 +78,10 @@ pub enum TypeBinding
     Alias(AbsolutePath),
     Union(AbsolutePath),
     Struct(AbsolutePath),
-    Enum(AbsolutePath),
+    /// An enum that can be converted to an integer
+    ValueEnum(AbsolutePath),
+    /// An enum that carries data
+    DataEnum(AbsolutePath),
+    /// A data enum variant - only for pattern matching
     EnumVariant(AbsolutePath, usize)
 }

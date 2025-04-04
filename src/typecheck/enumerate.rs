@@ -122,12 +122,12 @@ impl RuleEnumerate<'_, '_> {
             use crate::ast::path::ValueBinding;
             let tmp_ty;
             let t = match binding {
-                ValueBinding::EnumVariant(absolute_path, _) => {
+                ValueBinding::ValueEnumVariant(absolute_path, _) => {
                     // TODO: If this is a data variant, then it should be a function pointer
                     let ap = AbsolutePath(absolute_path.0[..absolute_path.0.len()-1].to_owned());
                     let mut enum_ty = Type::new_path(crate::ast::Path { root: crate::ast::path::Root::Root, components: ap.0.clone() });
                     let TypeKind::Named(_, ref mut binding) = enum_ty.kind else { panic!(); };
-                    *binding = Some(crate::ast::path::TypeBinding::Enum(ap));
+                    *binding = Some(crate::ast::path::TypeBinding::ValueEnum(ap));
 
                     tmp_ty = enum_ty;
                     &tmp_ty
@@ -298,19 +298,18 @@ impl<'a, 'b> crate::ast::ExprVisitor for RuleEnumerate<'a, 'b> {
                     &self.lc.constants.get(&absolute_path).expect("Incorrect function path")
                 },
                 ValueBinding::StructValue(absolute_path) => todo!(),
-                ValueBinding::EnumVariant(absolute_path, _) => {
-                    if self.lc.functions.get(&absolute_path).is_some() {
-                        todo!("Function pointer to enum variant")
-                    }
-                    else {
-                        let ap = absolute_path.parent();
-                        let mut enum_ty = Type::new_path(crate::ast::Path { root: crate::ast::path::Root::Root, components: ap.0.clone() });
-                        let TypeKind::Named(_, ref mut binding) = enum_ty.kind else { panic!(); };
-                        *binding = Some(crate::ast::path::TypeBinding::Enum(ap));
+                ValueBinding::DataEnumVariant(absolute_path, _) => {
+                    let Some(args) = self.lc.functions.get(&absolute_path) else { panic!("{}: Unable to find function for data variant {}", expr.span, absolute_path) };
+                    todo!("Function pointer to enum variant")
+                },
+                ValueBinding::ValueEnumVariant(absolute_path, _) => {
+                    let ap = absolute_path.parent();
+                    let mut enum_ty = Type::new_path(crate::ast::Path { root: crate::ast::path::Root::Root, components: ap.0.clone() });
+                    let TypeKind::Named(_, ref mut binding) = enum_ty.kind else { panic!(); };
+                    *binding = Some(crate::ast::path::TypeBinding::ValueEnum(ap));
 
-                        tmp_ty = enum_ty;
-                        &tmp_ty
-                    }
+                    tmp_ty = enum_ty;
+                    &tmp_ty
                 },
                 };
             self.equate_types(&expr.span, &expr.data_ty, &t);
@@ -321,7 +320,7 @@ impl<'a, 'b> crate::ast::ExprVisitor for RuleEnumerate<'a, 'b> {
             ValueBinding::Local(_) => todo!("call local"),
             ValueBinding::Function(absolute_path)
             |ValueBinding::StructValue(absolute_path)
-            |ValueBinding::EnumVariant(absolute_path, _) => {
+            |ValueBinding::DataEnumVariant(absolute_path, _) => {
                 let (ret_ty, arg_tys,is_variadic) = self.lc.functions.get(&absolute_path).unwrap();
                 self.equate_types(&expr.span, &expr.data_ty, ret_ty);
                 if *is_variadic {
@@ -340,6 +339,7 @@ impl<'a, 'b> crate::ast::ExprVisitor for RuleEnumerate<'a, 'b> {
                     self.make_coerce(&s, req_ty.clone(), arg_expr);
                 }
             },
+            ValueBinding::ValueEnumVariant(absolute_path, _) => todo!(),
             ValueBinding::Static(absolute_path) => todo!(),
             ValueBinding::Constant(absolute_path) => todo!(),
             }

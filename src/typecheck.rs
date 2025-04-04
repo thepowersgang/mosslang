@@ -65,7 +65,7 @@ fn enumerate_mod(lc: &mut LookupContext, module: &crate::ast::items::Module, pat
             let enm_path = path.append(v.name.as_ref().unwrap().clone());
             let enm_ty = Type { kind: TypeKind::Named(
                 crate::ast::Path { root: crate::ast::path::Root::Root, components: enm_path.0.clone() },
-                Some(crate::ast::path::TypeBinding::Enum(enm_path.clone()))
+                Some(crate::ast::path::TypeBinding::DataEnum(enm_path.clone()))
                 ) };
             for variant in &enm.variants {
                 if let crate::ast::items::EnumVariantTy::Data(ty) = &variant.ty {

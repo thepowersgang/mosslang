@@ -151,6 +151,6 @@ pub fn from_expr(parent: &mut super::State, expr_root: &crate::ast::ExprRoot) ->
 {
     let mut expr_visit = from_expr::Visitor::new(parent, &expr_root.variables);
     let ret_val = expr_visit.visit_expr(&expr_root.e);
-    todo!();
+    expr_visit.finish(ret_val)
 }
 mod from_expr;

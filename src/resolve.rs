@@ -67,12 +67,19 @@ fn resolve_mod(lc: &LookupCache, module: &mut crate::ast::items::Module)
                 },
             ItemType::Enum(enm) => {
                 let name = v.name.clone().unwrap();
+                let mut had_data = false;
                 let vi = enm.variants.iter().enumerate().map(|(i, v)| (v.name.clone(), (i, match v.ty {
                     crate::ast::items::EnumVariantTy::Bare => VariantInfo::Value,
                     crate::ast::items::EnumVariantTy::Value(_) => VariantInfo::Value,
-                    crate::ast::items::EnumVariantTy::Data(_) => VariantInfo::Type,
+                    crate::ast::items::EnumVariantTy::Data(_) => { had_data = true; VariantInfo::Type },
                     },),)).collect();
-                item_scope.types.insert(name.clone(), (TypeBinding::Enum(get_ap(name)), Some(vi)));
+                let tb = if had_data {
+                    TypeBinding::DataEnum(get_ap(name.clone()))
+                }
+                else {
+                    TypeBinding::ValueEnum(get_ap(name.clone()))
+                };
+                item_scope.types.insert(name, (tb, Some(vi)));
             },
             ItemType::TypeAlias(_) => {
                 let name = v.name.clone().unwrap();
@@ -180,8 +187,8 @@ fn resolve_path_type(item_scope: &ItemScope, p: &crate::ast::Path) -> crate::ast
     if p.components.len() == 2 {
         let vn = &p.components[1];
         if let Some((ap, Some(variants))) = item_scope.types.get(c) {
-            let TypeBinding::Enum(ap) = ap else { unreachable!() };
             if let Some((idx, VariantInfo::Value)) = variants.get(vn) {
+                let (TypeBinding::DataEnum(ap)|TypeBinding::ValueEnum(ap)) = ap else { unreachable!() };
                 return crate::ast::path::TypeBinding::EnumVariant(ap.append(vn.clone()), *idx)
             }
         }
@@ -281,9 +288,12 @@ fn resolve_expr(item_scope: &ItemScope, expr: &mut crate::ast::ExprRoot, args: &
             if p.components.len() == 2 {
                 let vn = &p.components[1];
                 if let Some((ap, Some(variants))) = self.item_scope.types.get(c) {
-                    let TypeBinding::Enum(ap) = ap else { unreachable!() };
                     if let Some((idx, VariantInfo::Value)) = variants.get(vn) {
-                        return crate::ast::path::ValueBinding::EnumVariant(ap.append(vn.clone()), *idx)
+                        return match ap {
+                        TypeBinding::DataEnum(ap) => crate::ast::path::ValueBinding::DataEnumVariant(ap.append(vn.clone()), *idx),
+                        TypeBinding::ValueEnum(ap) => crate::ast::path::ValueBinding::ValueEnumVariant(ap.append(vn.clone()), *idx),
+                        _ => unreachable!(),
+                        };
                     }
                 }
             }

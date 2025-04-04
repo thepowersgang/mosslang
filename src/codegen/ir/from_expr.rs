@@ -31,6 +31,16 @@ impl<'a,'b> Visitor<'a,'b> {
         rv.output.blocks.push(None);    // We start with block #0 active
         rv
     }
+    pub fn finish(mut self, tail_val: super::Value) -> super::Expr {
+        match tail_val {
+        super::Value::Unreachable => {},
+        _ => self.output.end_block(super::Terminator::Return(tail_val)),
+        }
+        super::Expr {
+            locals: self.output.local_types,
+            blocks: self.output.blocks.into_iter().map(|b| b.unwrap()).collect(),
+        }
+    }
     pub fn visit_expr(&mut self, expr: &crate::ast::expr::Expr) -> super::Value {
         let _i = INDENT.inc_f("visit_expr", format_args!("{:?}", &expr.kind));
         use super::{Value,Terminator,Operation};
@@ -112,12 +122,13 @@ impl<'a,'b> Visitor<'a,'b> {
             match b {
             ValueBinding::Local(i) => Value::Local(super::LocalIndex(*i as _), Default::default()),
             ValueBinding::Function(absolute_path) => todo!("function pointer"),
+            ValueBinding::DataEnumVariant(absolute_path, _) => todo!("function pointer"),
             ValueBinding::Static(ap) => Value::Named(ap.clone(), Default::default()),
             ValueBinding::Constant(absolute_path) => {
                 self.visit_expr( &self.parent.constants.get(absolute_path).expect("Missing constant?").e )
             },
             ValueBinding::StructValue(absolute_path) => todo!("function pointer - struct"),
-            ValueBinding::EnumVariant(absolute_path, idx) => {
+            ValueBinding::ValueEnumVariant(absolute_path, idx) => {
                 // HACK: Assume that the variant isn't a data-holding variant
                 Value::IntegerLiteral(*idx as _)
                 },
@@ -138,7 +149,8 @@ impl<'a,'b> Visitor<'a,'b> {
             ValueBinding::Static(absolute_path) => todo!(),
             ValueBinding::Constant(absolute_path) => todo!(),
             ValueBinding::StructValue(absolute_path) => todo!(),
-            ValueBinding::EnumVariant(absolute_path, idx) => todo!(),
+            ValueBinding::DataEnumVariant(absolute_path, idx) => todo!("create data enum variant"),
+            ValueBinding::ValueEnumVariant(absolute_path, _) => panic!("{}: Unexpected CallPath of value enum variant - {}", expr.span, absolute_path),
             }
             Value::Local(rv, Default::default())
         },
@@ -199,26 +211,33 @@ impl<'a,'b> Visitor<'a,'b> {
             Value::Unreachable => Value::Unreachable,
             Value::ImplicitUnit => todo!("Borrow of an ImplicitUnit?"),
             Value::Local(local_index, wrapper_list) => {
-                todo!("Borrow a local variable");
-                #[cfg(any())]
-                match wrapper_list.split_at_last_deref() {
-                Ok( (pre,post) ) => {
-                    if post.is_empty() {
-                        Value::Local(local_index, pre)
-                    }
-                    else {
-                        let tmp = self.output.allocate_slot(/*todo*/);
-                        self.output.push_stmt(Operation::AssignLocal(tmp, Default::default(), Value::Local(local_index, pre)));
-                        let rv = self.output.allocate_slot(&expr.data_ty);
-                        self.output.push_stmt(Operation::BorrowLocal(rv, *is_mut, tmp, post));
-                        Value::Local(rv, Default::default())
-                    }
-                },
-                Err(wrapper_list) => {
+                if wrapper_list.is_empty() {
                     let rv = self.output.allocate_slot(&expr.data_ty);
-                    self.output.push_stmt(Operation::BorrowLocal(rv, *is_mut, local_index, wrapper_list));
+                    self.output.push_stmt(Operation::BorrowLocal(rv, *is_mut, local_index, Default::default()));
                     Value::Local(rv, Default::default())
                 }
+                else {
+                    todo!("{}: Borrow a local variable - {:?}", expr.span, Value::Local(local_index, wrapper_list));
+                    #[cfg(any())]
+                    match wrapper_list.split_at_last_deref() {
+                    Ok( (pre,post) ) => {
+                        if post.is_empty() {
+                            Value::Local(local_index, pre)
+                        }
+                        else {
+                            let tmp = self.output.allocate_slot(/*todo*/);
+                            self.output.push_stmt(Operation::AssignLocal(tmp, Default::default(), Value::Local(local_index, pre)));
+                            let rv = self.output.allocate_slot(&expr.data_ty);
+                            self.output.push_stmt(Operation::BorrowLocal(rv, *is_mut, tmp, post));
+                            Value::Local(rv, Default::default())
+                        }
+                    },
+                    Err(wrapper_list) => {
+                        let rv = self.output.allocate_slot(&expr.data_ty);
+                        self.output.push_stmt(Operation::BorrowLocal(rv, *is_mut, local_index, wrapper_list));
+                        Value::Local(rv, Default::default())
+                    }
+                    }
                 }
             },
             Value::Named(absolute_path, wrapper_list) => todo!(),
@@ -253,6 +272,7 @@ impl<'a,'b> Visitor<'a,'b> {
             (TypeKind::Void, _) => Value::ImplicitUnit,
             (TypeKind::Pointer { .. },TypeKind::Pointer { .. }) => v,
             (TypeKind::Integer { .. },TypeKind::Integer { .. }) => v,   // TODO: Should this use an operation to truncate the value?
+            (TypeKind::Integer { .. },TypeKind::Named(_, Some(crate::ast::path::TypeBinding::ValueEnum(_)))) => v,
             _ => todo!("{}: lower IR: convert {} to {} - {:?}", expr.span, val_expr.data_ty, expr.data_ty, v),
             }
         },
@@ -498,13 +518,16 @@ impl<'a,'b> Visitor<'a,'b> {
                 self.output.end_block(super::Terminator::Compare(value, super::CmpOp::Eq, cv,  bb_true, bb_false));
                 return ;
             },
-            ValueBinding::EnumVariant(_, var_idx) => {
+            ValueBinding::ValueEnumVariant(_, var_idx) => {
                 // Get the enum variant index
                 //TODO: The below is only valid for non-data enums
                 // Compare against this index
                 self.output.end_block(super::Terminator::Compare(value, super::CmpOp::Eq, super::Value::IntegerLiteral(*var_idx as u128),  bb_true, bb_false));
                 return ;
             },
+            ValueBinding::DataEnumVariant(_, var_idx) => {
+                todo!("{span}: Match data enum", span=pattern.span);
+                }
             }
         },
         PatternTy::Tuple(patterns) => {

@@ -99,7 +99,8 @@ impl Type
                     TypeBinding::Alias(absolute_path) => ("alias", absolute_path),
                     TypeBinding::Union(absolute_path) => ("union", absolute_path),
                     TypeBinding::Struct(absolute_path) => ("struct", absolute_path),
-                    TypeBinding::Enum(absolute_path) => ("enum", absolute_path),
+                    TypeBinding::DataEnum(absolute_path) => ("enum[d]", absolute_path),
+                    TypeBinding::ValueEnum(absolute_path) => ("enum[v]", absolute_path),
                     TypeBinding::EnumVariant(absolute_path, _) => ("variant", absolute_path),
                     };
                 if is_debug {
