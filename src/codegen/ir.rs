@@ -6,6 +6,7 @@ pub enum Value {
     ImplicitUnit,
     Local(LocalIndex, WrapperList),
     Named(crate::ast::path::AbsolutePath, WrapperList),
+    Deref { ptr: LocalIndex, wrappers: WrapperList },
     StringLiteral(crate::ast::StringLiteral),
     IntegerLiteral(u128, ),
 }
@@ -16,11 +17,16 @@ impl Value {
         Value::ImplicitUnit => panic!("Field on void"),
         Value::StringLiteral(..) => panic!("Field on string"),
         Value::IntegerLiteral(..) => panic!("Field on integer"),
-        Value::Local(root, indexes) => Value::Local(*root, indexes.with_added(Wrapper::Field(idx))),
-        Value::Named(root, indexes) => Value::Named(root.clone(), indexes.with_added(Wrapper::Field(idx))),
+        Value::Local(root, wrappers) => Value::Local(*root, wrappers.with_added(Wrapper::Field(idx))),
+        Value::Named(root, wrappers) => Value::Named(root.clone(), wrappers.with_added(Wrapper::Field(idx))),
+        Value::Deref { ptr, wrappers } => Value::Deref { ptr: *ptr , wrappers: wrappers.with_added(Wrapper::Field(idx)) }
         }
     }
 }
+
+/// List of access wrappers to a value (indexing and field accesses)
+/// 
+/// Dereferencing is handled with different value types
 #[derive(Default,Clone)]
 pub(super) struct WrapperList(Vec<u32>);
 impl WrapperList {
@@ -42,17 +48,13 @@ impl WrapperList {
 
     fn encode(w: Wrapper) -> u32 {
         match w {
-        Wrapper::Deref => !0,
         Wrapper::Field(idx) => idx as u32,
         Wrapper::IndexBySlot(LocalIndex(s)) => (1 << 31) | s as u32,
         }
     }
 
     fn decode(v: u32) -> Wrapper {
-        if v == !0 {
-            Wrapper::Deref
-        }
-        else if v & 1 << 31 == 0 {
+        if v & 1 << 31 == 0 {
             Wrapper::Field(v as usize)
         }
         else {
@@ -72,7 +74,6 @@ impl ::core::fmt::Debug for WrapperList {
 }
 #[derive(Debug)]
 pub(super) enum Wrapper {
-    Deref,
     Field(usize),
     IndexBySlot(LocalIndex),
 }
@@ -91,13 +92,10 @@ pub enum Operation {
     BinOp(LocalIndex, Value, BinOp, Value),
     /// Unary operation
     UniOp(LocalIndex, UniOp, Value),
-    //Compare(LocalIndex, Value, CmpOp, Value),
     /// Take a borrow/pointer to a local variable, with a flag indicating if it's a mutable borrow
-    /// 
-    /// The wrapper list must not include a `Deref` operation
     BorrowLocal(LocalIndex, bool, LocalIndex, WrapperList),
     /// Take a borrow/pointer based on an existing pointer
-    BorrowIndirect(LocalIndex, bool, LocalIndex, WrapperList),
+    PointerOffset(LocalIndex, bool, LocalIndex, WrapperList),
 }
 #[derive(Debug)]
 pub enum BinOp {

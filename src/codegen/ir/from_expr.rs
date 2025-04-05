@@ -114,6 +114,11 @@ impl<'a,'b> Visitor<'a,'b> {
                 }
                 Value::ImplicitUnit
                 },
+            Value::Deref { ptr, wrappers } => {
+                todo!("Assign to deref")
+                //self.output.push_stmt(Operation::AssignDeref(ptr, wrappers, v_value));
+                //Value::ImplicitUnit
+                },
             }
         },
         ExprKind::NamedValue(path, binding) => {
@@ -182,7 +187,7 @@ impl<'a,'b> Visitor<'a,'b> {
                 Value::IntegerLiteral(i) => Some(super::Wrapper::Field(i as usize)),
                 Value::Local(idx, wrappers) if wrappers.is_empty() =>
                     Some(super::Wrapper::IndexBySlot(idx)),
-                Value::Local(..) | Value::Named(..) => {
+                Value::Local(..) | Value::Named(..) | Value::Deref { .. } => {
                     let s = self.output.allocate_slot(&expr_i.data_ty);
                     self.output.push_stmt(Operation::AssignLocal(s, Default::default(), i));
                     Some(super::Wrapper::IndexBySlot(s))
@@ -203,6 +208,10 @@ impl<'a,'b> Visitor<'a,'b> {
                 wrapper_list.push(w);
                 Value::Named(absolute_path, wrapper_list)
                 },
+            (Value::Deref { ptr, mut wrappers }, Some(w)) => {
+                wrappers.push(w);
+                Value::Deref { ptr, wrappers }
+                },
             }
         },
         ExprKind::Addr(is_mut, val_expr) => {
@@ -211,36 +220,12 @@ impl<'a,'b> Visitor<'a,'b> {
             Value::Unreachable => Value::Unreachable,
             Value::ImplicitUnit => todo!("Borrow of an ImplicitUnit?"),
             Value::Local(local_index, wrapper_list) => {
-                if wrapper_list.is_empty() {
-                    let rv = self.output.allocate_slot(&expr.data_ty);
-                    self.output.push_stmt(Operation::BorrowLocal(rv, *is_mut, local_index, Default::default()));
-                    Value::Local(rv, Default::default())
-                }
-                else {
-                    todo!("{}: Borrow a local variable - {:?}", expr.span, Value::Local(local_index, wrapper_list));
-                    #[cfg(any())]
-                    match wrapper_list.split_at_last_deref() {
-                    Ok( (pre,post) ) => {
-                        if post.is_empty() {
-                            Value::Local(local_index, pre)
-                        }
-                        else {
-                            let tmp = self.output.allocate_slot(/*todo*/);
-                            self.output.push_stmt(Operation::AssignLocal(tmp, Default::default(), Value::Local(local_index, pre)));
-                            let rv = self.output.allocate_slot(&expr.data_ty);
-                            self.output.push_stmt(Operation::BorrowLocal(rv, *is_mut, tmp, post));
-                            Value::Local(rv, Default::default())
-                        }
-                    },
-                    Err(wrapper_list) => {
-                        let rv = self.output.allocate_slot(&expr.data_ty);
-                        self.output.push_stmt(Operation::BorrowLocal(rv, *is_mut, local_index, wrapper_list));
-                        Value::Local(rv, Default::default())
-                    }
-                    }
-                }
+                let rv = self.output.allocate_slot(&expr.data_ty);
+                self.output.push_stmt(Operation::BorrowLocal(rv, *is_mut, local_index, wrapper_list));
+                Value::Local(rv, Default::default())
             },
             Value::Named(absolute_path, wrapper_list) => todo!(),
+            Value::Deref { .. } => todo!(),
             
             Value::StringLiteral(_) | Value::IntegerLiteral(_) => {
                 let tmp = self.output.allocate_slot(&val_expr.data_ty);
@@ -251,17 +236,21 @@ impl<'a,'b> Visitor<'a,'b> {
             },
             }
         },
-        ExprKind::Deref(expr) => {
-            let v = self.visit_expr(expr);
+        ExprKind::Deref(val_expr) => {
+            let v = self.visit_expr(val_expr);
             match v {
             Value::Unreachable => Value::Unreachable,
             Value::StringLiteral(_) => panic!("Deref of string literal?"),
             Value::IntegerLiteral(_) => panic!("Type error: Deref of integer"),
             Value::ImplicitUnit => panic!("Type error: Deref of unit"),
-            Value::Local(local_index, wrapper_list) =>
-                Value::Local(local_index, wrapper_list.add(super::Wrapper::Deref)),
-            Value::Named(absolute_path, wrapper_list) =>
-            Value::Named(absolute_path, wrapper_list.add(super::Wrapper::Deref)),
+            Value::Local(local_index, wrapper_list) if wrapper_list.is_empty() => {
+                Value::Deref { ptr: local_index, wrappers: Default::default() }
+                }
+            Value::Local(..) | Value::Named(..) | Value::Deref { .. } => {
+                let tmp = self.output.allocate_slot(&val_expr.data_ty);
+                self.output.push_stmt(Operation::AssignLocal(tmp, Default::default(), v));
+                Value::Deref { ptr: tmp, wrappers: Default::default() }
+                },
             }
         },
         ExprKind::Cast(val_expr, _) | ExprKind::Coerce(val_expr) => {
@@ -321,11 +310,12 @@ impl<'a,'b> Visitor<'a,'b> {
             BinOpTy::Mul => binop(self, rv, expr_l, super::BinOp::Mul, expr_r),
             BinOpTy::Div => binop(self, rv, expr_l, super::BinOp::Div, expr_r),
             BinOpTy::Rem => binop(self, rv, expr_l, super::BinOp::Rem, expr_r),
-            BinOpTy::BitAnd => todo!(),
-            BinOpTy::BitOr  => todo!(),
-            BinOpTy::BitXor => todo!(),
-            BinOpTy::Shl => todo!(),
-            BinOpTy::Shr => todo!(),
+
+            BinOpTy::BitAnd
+            |BinOpTy::BitOr
+            |BinOpTy::BitXor => todo!("{:?}", bin_op_ty),
+            BinOpTy::Shl
+            |BinOpTy::Shr => todo!("{:?}", bin_op_ty),
             
             BinOpTy::Equals    => cmp(self, rv, expr_l, super::CmpOp::Eq, expr_r),
             BinOpTy::NotEquals => cmp(self, rv, expr_l, super::CmpOp::Ne, expr_r),
