@@ -46,6 +46,10 @@ impl WrapperList {
         self.0.push(Self::encode(w));
     }
 
+    pub fn iter(&self) -> impl Iterator<Item=Wrapper> + '_ {
+        self.0.iter().map(|&v|Self::decode(v))
+    }
+
     fn encode(w: Wrapper) -> u32 {
         match w {
         Wrapper::Field(idx) => idx as u32,
@@ -163,3 +167,6 @@ pub fn from_expr(parent: &mut super::State, expr_root: &crate::ast::ExprRoot) ->
     expr_visit.finish(ret_val)
 }
 mod from_expr;
+
+mod dump;
+pub use self::dump::dump;

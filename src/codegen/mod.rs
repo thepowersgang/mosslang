@@ -66,6 +66,7 @@ impl<'a> State<'a> {
         let _i = INDENT.inc("emit_function");
         println!("{INDENT}emit_function: {name}");
         let ir = ir::from_expr(self, &f.code);
+        ir::dump(&mut ::std::io::stderr(), &ir).unwrap();
     }
     fn emit_static(&mut self, name: &super::Ident, s: &crate::ast::items::Static) {
     }
