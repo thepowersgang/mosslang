@@ -284,6 +284,11 @@ impl<'a,'b> Visitor<'a,'b> {
                 let v_r = this.visit_expr(expr_r);
                 this.output.push_stmt(Operation::BinOp(rv, v_l, op, v_r))
             }
+            fn bitshift(this: &mut Visitor, rv: super::LocalIndex, expr_l: &Expr, op: super::BitShift, expr_r: &Expr) {
+                let v_l = this.visit_expr(expr_l);
+                let v_r = this.visit_expr(expr_r);
+                this.output.push_stmt(Operation::BitShift(rv, v_l, op, v_r))
+            }
             fn cmp(this: &mut Visitor, rv: super::LocalIndex, expr_l: &Expr, op: super::CmpOp, expr_r: &Expr) {
                 let v_l = this.visit_expr(expr_l);
                 let v_r = this.visit_expr(expr_r);
@@ -311,11 +316,12 @@ impl<'a,'b> Visitor<'a,'b> {
             BinOpTy::Div => binop(self, rv, expr_l, super::BinOp::Div, expr_r),
             BinOpTy::Rem => binop(self, rv, expr_l, super::BinOp::Rem, expr_r),
 
-            BinOpTy::BitAnd
-            |BinOpTy::BitOr
-            |BinOpTy::BitXor => todo!("{:?}", bin_op_ty),
-            BinOpTy::Shl
-            |BinOpTy::Shr => todo!("{:?}", bin_op_ty),
+            BinOpTy::BitAnd => binop(self, rv, expr_l, super::BinOp::BitAnd, expr_r),
+            BinOpTy::BitOr  => binop(self, rv, expr_l, super::BinOp::BitOr , expr_r),
+            BinOpTy::BitXor => binop(self, rv, expr_l, super::BinOp::BitXor, expr_r),
+
+            BinOpTy::Shl => bitshift(self, rv, expr_l, super::BitShift::Left , expr_r),
+            BinOpTy::Shr => bitshift(self, rv, expr_l, super::BitShift::Right, expr_r),
             
             BinOpTy::Equals    => cmp(self, rv, expr_l, super::CmpOp::Eq, expr_r),
             BinOpTy::NotEquals => cmp(self, rv, expr_l, super::CmpOp::Ne, expr_r),
@@ -573,7 +579,7 @@ impl<'a,'b> Visitor<'a,'b> {
         match &pattern.ty {
         PatternTy::Any => {},
         PatternTy::MaybeBind(_) => unreachable!("Should have been resolved"),
-        PatternTy::NamedValue(_, _binding) => {},
+        PatternTy::NamedValue(_, _) => {},
         PatternTy::Tuple(patterns) => {
             for (i,sp) in patterns.iter().enumerate() {
                 self.destructure_pattern(sp, value.field(i));

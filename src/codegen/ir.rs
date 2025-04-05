@@ -92,6 +92,8 @@ pub enum Operation {
     BinOp(LocalIndex, Value, BinOp, Value),
     /// Unary operation
     UniOp(LocalIndex, UniOp, Value),
+    /// Bitwise shift, different operation because it doesn't require equal types
+    BitShift(LocalIndex, Value, BitShift, Value),
     /// Take a borrow/pointer to a local variable, with a flag indicating if it's a mutable borrow
     BorrowLocal(LocalIndex, bool, LocalIndex, WrapperList),
     /// Take a borrow/pointer based on an existing pointer
@@ -101,6 +103,13 @@ pub enum Operation {
 pub enum BinOp {
     Add, Sub,
     Mul, Div, Rem,
+
+    BitOr, BitAnd, BitXor,
+}
+#[derive(Debug)]
+pub enum BitShift {
+    Left,
+    Right,
 }
 #[derive(Debug)]
 pub enum UniOp {
@@ -133,12 +142,14 @@ pub struct BlockIndex(pub usize);
 #[derive(Debug)]
 pub struct LocalIndex(pub usize);
 
+#[derive(Debug)]
 pub struct Block
 {
     //pub args:
     pub statements: Vec<Operation>,
     pub terminator: Terminator,
 }
+#[derive(Debug)]
 pub struct Expr
 {
     pub locals: Vec<crate::ast::Type>,
