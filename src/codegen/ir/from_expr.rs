@@ -72,7 +72,7 @@ impl<'a,'b> Visitor<'a,'b> {
         ExprKind::Break(expr) => {
             let e = if let Some(expr) = expr { self.visit_expr(expr) } else { Value::ImplicitUnit };
             let Some(l) = self.loop_stack.last() else { panic!("`break` not in a loop") };
-            self.output.push_stmt(Operation::AssignLocal(l.break_slot, Default::default(), e));
+            self.output.push_stmt(Operation::AssignLocal(l.break_slot, e));
             self.output.end_block(Terminator::Goto(l.exit));
 
             let b = self.output.new_block();
@@ -102,22 +102,37 @@ impl<'a,'b> Visitor<'a,'b> {
             Value::IntegerLiteral(_) => panic!("Type error: Assigning to integer literal"),
             Value::ImplicitUnit => panic!("Type error: Assigning to unit"),
             Value::Local(local_index, wrapper_list) => {
-                self.output.push_stmt(Operation::AssignLocal(local_index, wrapper_list, v_value));
+                if !wrapper_list.is_empty() {
+                    let tmp_local = self.output.allocate_slot(&crate::ast::Type::new_ptr(false, slot.data_ty.clone()));
+                    self.output.push_stmt(Operation::BorrowLocal(tmp_local, true, local_index, wrapper_list));
+                    self.output.push_stmt(Operation::AssignDeref(tmp_local, v_value));
+                }
+                else {
+                    self.output.push_stmt(Operation::AssignLocal(local_index, v_value));
+                }
                 Value::ImplicitUnit
                 },
             Value::Named(absolute_path, wrapper_list) => {
                 if wrapper_list.is_empty() {
-                    self.output.push_stmt(Operation::AssignNamed(absolute_path, v_value));
+                    todo!("Assign to named")
+                    //self.output.push_stmt(Operation::AssignNamed(absolute_path, v_value));
                 }
                 else {
-                    todo!("Assign to a named deref?")
+                    todo!("Assign to a named via wrappers?")
                 }
                 Value::ImplicitUnit
                 },
             Value::Deref { ptr, wrappers } => {
-                todo!("Assign to deref")
-                //self.output.push_stmt(Operation::AssignDeref(ptr, wrappers, v_value));
-                //Value::ImplicitUnit
+                let dst_local = if wrappers.is_empty() {
+                        let tmp_local = self.output.allocate_slot(&crate::ast::Type::new_ptr(false, slot.data_ty.clone()));
+                        self.output.push_stmt(Operation::PointerOffset(tmp_local, true, ptr, wrappers));
+                        tmp_local
+                    }
+                    else {
+                        ptr
+                    };
+                self.output.push_stmt(Operation::AssignDeref(dst_local, v_value));
+                Value::ImplicitUnit
                 },
             }
         },
@@ -189,7 +204,7 @@ impl<'a,'b> Visitor<'a,'b> {
                     Some(super::Wrapper::IndexBySlot(idx)),
                 Value::Local(..) | Value::Named(..) | Value::Deref { .. } => {
                     let s = self.output.allocate_slot(&expr_i.data_ty);
-                    self.output.push_stmt(Operation::AssignLocal(s, Default::default(), i));
+                    self.output.push_stmt(Operation::AssignLocal(s, i));
                     Some(super::Wrapper::IndexBySlot(s))
                 }
                 };
@@ -229,7 +244,7 @@ impl<'a,'b> Visitor<'a,'b> {
             
             Value::StringLiteral(_) | Value::IntegerLiteral(_) => {
                 let tmp = self.output.allocate_slot(&val_expr.data_ty);
-                self.output.push_stmt(Operation::AssignLocal(tmp, Default::default(), v));
+                self.output.push_stmt(Operation::AssignLocal(tmp, v));
                 let rv = self.output.allocate_slot(&expr.data_ty);
                 self.output.push_stmt(Operation::BorrowLocal(rv, *is_mut, tmp, Default::default()));
                 Value::Local(rv, Default::default())
@@ -248,7 +263,7 @@ impl<'a,'b> Visitor<'a,'b> {
                 }
             Value::Local(..) | Value::Named(..) | Value::Deref { .. } => {
                 let tmp = self.output.allocate_slot(&val_expr.data_ty);
-                self.output.push_stmt(Operation::AssignLocal(tmp, Default::default(), v));
+                self.output.push_stmt(Operation::AssignLocal(tmp, v));
                 Value::Deref { ptr: tmp, wrappers: Default::default() }
                 },
             }
@@ -298,11 +313,11 @@ impl<'a,'b> Visitor<'a,'b> {
                 this.output.end_block(Terminator::Compare(v_l, op, v_r, bb_true, bb_false));
             
                 this.output.start_block(bb_true);
-                this.output.push_stmt(Operation::AssignLocal(rv, Default::default(), Value::IntegerLiteral(1)));
+                this.output.push_stmt(Operation::AssignLocal(rv, Value::IntegerLiteral(1)));
                 this.output.end_block(Terminator::Goto(bb_exit));
             
                 this.output.start_block(bb_false);
-                this.output.push_stmt(Operation::AssignLocal(rv, Default::default(), Value::IntegerLiteral(0)));
+                this.output.push_stmt(Operation::AssignLocal(rv, Value::IntegerLiteral(0)));
                 this.output.end_block(Terminator::Goto(bb_exit));
 
                 this.output.start_block(bb_exit);
@@ -347,11 +362,11 @@ impl<'a,'b> Visitor<'a,'b> {
                 self.apply_if(expr_r, bb_true, bb_false);
                 
                 self.output.start_block(bb_true);
-                self.output.push_stmt(Operation::AssignLocal(rv, Default::default(), Value::IntegerLiteral(1)));
+                self.output.push_stmt(Operation::AssignLocal(rv, Value::IntegerLiteral(1)));
                 self.output.end_block(Terminator::Goto(bb_exit));
                 
                 self.output.start_block(bb_false);
-                self.output.push_stmt(Operation::AssignLocal(rv, Default::default(), Value::IntegerLiteral(0)));
+                self.output.push_stmt(Operation::AssignLocal(rv, Value::IntegerLiteral(0)));
                 self.output.end_block(Terminator::Goto(bb_exit));
 
                 self.output.start_block(bb_exit);
@@ -403,7 +418,7 @@ impl<'a,'b> Visitor<'a,'b> {
                 self.visit_expr_block(else_block);
             }
             else {
-                self.output.push_stmt(Operation::AssignLocal(break_slot, Default::default(), Value::ImplicitUnit));
+                self.output.push_stmt(Operation::AssignLocal(break_slot, Value::ImplicitUnit));
             }
             self.output.end_block(Terminator::Goto(bb_exit));
 
@@ -427,7 +442,7 @@ impl<'a,'b> Visitor<'a,'b> {
                 break_slot,
             });
             
-            self.output.push_stmt(Operation::AssignLocal(slot_it_value, Default::default(), start_value));
+            self.output.push_stmt(Operation::AssignLocal(slot_it_value, start_value));
             self.output.end_block(Terminator::Goto(bb_head));
 
             self.output.start_block(bb_head);
@@ -449,7 +464,7 @@ impl<'a,'b> Visitor<'a,'b> {
                 self.visit_expr_block(else_block);
             }
             else {
-                self.output.push_stmt(Operation::AssignLocal(break_slot, Default::default(), Value::ImplicitUnit));
+                self.output.push_stmt(Operation::AssignLocal(break_slot, Value::ImplicitUnit));
             }
             self.output.end_block(Terminator::Goto(bb_exit));
 
@@ -466,7 +481,7 @@ impl<'a,'b> Visitor<'a,'b> {
 
                 self.output.start_block(bb_body);
                 let v = self.visit_expr_block(&b.body);
-                self.output.push_stmt(Operation::AssignLocal(res_slot, Default::default(), v));
+                self.output.push_stmt(Operation::AssignLocal(res_slot, v));
                 self.output.end_block(Terminator::Goto(bb_exit));
 
                 self.output.start_block(bb_next);
@@ -477,7 +492,7 @@ impl<'a,'b> Visitor<'a,'b> {
             else {
                 Value::ImplicitUnit
             };
-            self.output.push_stmt(Operation::AssignLocal(res_slot, Default::default(), ev));
+            self.output.push_stmt(Operation::AssignLocal(res_slot, ev));
             self.output.end_block(Terminator::Goto(bb_exit));
 
             self.output.start_block(bb_exit);
@@ -499,7 +514,7 @@ impl<'a,'b> Visitor<'a,'b> {
                 self.output.start_block(bb_body);
                 self.destructure_pattern(&b.pat, value.clone());
                 let v = self.visit_expr(&b.val);
-                self.output.push_stmt(Operation::AssignLocal(res_slot, Default::default(), v));
+                self.output.push_stmt(Operation::AssignLocal(res_slot, v));
                 self.output.end_block(Terminator::Goto(bb_exit));
 
                 self.output.start_block(bb_next);
@@ -593,7 +608,7 @@ impl<'a,'b> Visitor<'a,'b> {
         if let Some(b) = pattern.bindings.first() {
             // Create variable? Should already be created, just needs to be assigned.
             let i = b.index.expect("pattern binding not bound");
-            self.output.push_stmt(super::Operation::AssignLocal(super::LocalIndex(i as _), Default::default(), value));
+            self.output.push_stmt(super::Operation::AssignLocal(super::LocalIndex(i as _), value));
         }
     }
 

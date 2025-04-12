@@ -11,10 +11,10 @@ pub fn dump(dst: &mut dyn ::std::io::Write, src: &super::Expr) -> ::std::io::Res
         for stmt in &block.statements {
             write!(dst, "    ")?;
             match stmt {
-            Operation::AssignLocal(local_index, wrapper_list, value)
-                => write!(dst, "{}{} = {}", F(local_index), F(wrapper_list), F(value))?,
-            Operation::AssignNamed(absolute_path, value)
-                => write!(dst, "{} = {}", absolute_path, F(value))?,
+            Operation::AssignLocal(local_index, value)
+                => write!(dst, "{} = {}", F(local_index), F(value))?,
+            Operation::AssignDeref(local_index, value)
+                => write!(dst, "*{} = {}", F(local_index), F(value))?,
             Operation::CreateComposite(local_index, absolute_path, values) => {
                 if let Some(absolute_path) = absolute_path {
                     write!(dst, "{} = {{ ", F(local_index))?;

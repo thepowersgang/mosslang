@@ -7,6 +7,9 @@ use ::std::collections::HashMap;
 
 mod ir;
 
+#[cfg(feature="cranelift")]
+mod backend_cranelift;
+
 struct State<'a> {
     ofp: ::std::fs::File,
     constants: HashMap<AbsolutePath,&'a crate::ast::ExprRoot>,
@@ -66,8 +69,12 @@ impl<'a> State<'a> {
         let _i = INDENT.inc("emit_function");
         println!("{INDENT}emit_function: {name}");
         let ir = ir::from_expr(self, &f.code);
-        ir::dump(&mut ::std::io::stderr(), &ir).unwrap();
+        ir::dump(&mut self.ofp, &ir).unwrap();
     }
     fn emit_static(&mut self, name: &super::Ident, s: &crate::ast::items::Static) {
+        let _i = INDENT.inc("emit_static");
+        println!("{INDENT}emit_static: {name}");
+        let ir = ir::from_expr(self, &s.value);
+        ir::dump(&mut self.ofp, &ir).unwrap();
     }
 }

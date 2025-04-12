@@ -2,12 +2,19 @@
 
 #[derive(Debug,Clone)]
 pub enum Value {
+    /// Indicates that this value can never be constructed
     Unreachable,
+    /// A unit value from anything other than a literal `()`
     ImplicitUnit,
+    /// Value stored in a local variable
     Local(LocalIndex, WrapperList),
+    /// Value in a gloabl variable
     Named(crate::ast::path::AbsolutePath, WrapperList),
+    /// Deref a pointer and then apply wrappers
     Deref { ptr: LocalIndex, wrappers: WrapperList },
+    /// String literal
     StringLiteral(crate::ast::StringLiteral),
+    /// An integer literal
     IntegerLiteral(u128, ),
 }
 impl Value {
@@ -85,22 +92,26 @@ pub(super) enum Wrapper {
 #[derive(Debug)]
 pub enum Operation {
     /// Assign a value to a local variable
-    AssignLocal(LocalIndex, WrapperList, Value),
-    /// Assign a value to a global variable
-    AssignNamed(crate::ast::path::AbsolutePath, Value),
+    AssignLocal(LocalIndex, Value),
+    /// Assign a value to a dereference of a pointer (in a local variable)
+    AssignDeref(LocalIndex, Value),
+
     /// Create an instance of a composite value (tuple or struct)
     CreateComposite(LocalIndex, Option<crate::ast::path::AbsolutePath>, Vec<Value>),
-    //// Cast a value to a differen type (primitives only)
+
+    //// Cast a value to a different type (primitives only)
     //Cast(LocalIndex, Value),
+
     /// Binary operation
     BinOp(LocalIndex, Value, BinOp, Value),
     /// Unary operation
     UniOp(LocalIndex, UniOp, Value),
     /// Bitwise shift, different operation because it doesn't require equal types
     BitShift(LocalIndex, Value, BitShift, Value),
+
     /// Take a borrow/pointer to a local variable, with a flag indicating if it's a mutable borrow
     BorrowLocal(LocalIndex, bool, LocalIndex, WrapperList),
-    /// Take a borrow/pointer based on an existing pointer
+    /// Take a borrow/pointer based on an existing pointer, with flag indicating mutable
     PointerOffset(LocalIndex, bool, LocalIndex, WrapperList),
 }
 #[derive(Debug)]

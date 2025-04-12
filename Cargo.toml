@@ -6,6 +6,9 @@ edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+cranelift = [ "dep:cranelift-frontend", "dep:cranelift-codegen", "dep:cranelift-module", "dep:cranelift-object" ]
+
 [profile.dev]
 opt-level = 1
 
@@ -28,8 +31,8 @@ utf8reader = "0.1.0"
 
 
 # Cranelift codegen backend
-#cranelift-frontend = "0.67"
-#cranelift-codegen = "0.67"
-#cranelift-module = "0.67"
-#cranelift-object = "0.67"
-#target-lexicon = "0.11"
+cranelift-frontend = { version = "0.118", optional = true }
+cranelift-codegen  = { version = "0.118", optional = true }
+cranelift-module   = { version = "0.118", optional = true }
+cranelift-object   = { version = "0.118", optional = true }
+# target-lexicon = "0.11"
