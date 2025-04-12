@@ -25,6 +25,7 @@ struct SDL_Format {
 struct sFILE {
     ...
 }
+
 type FILE = *mut sFILE;
 const NULL: *mut void = 0;
 extern {
@@ -72,6 +73,7 @@ extern "C" fn main(argc: usize, argv: *const *const c_char) -> i32 {
             }
         }
         else if argv[i][1] != '-' as i8 {
+			// TODO: Error - no short arguments
         }
         else {
             if strcmp(argv[i], "--uncompressed") == 0 {
