@@ -98,8 +98,9 @@ impl<'a,'b> Visitor<'a,'b> {
                 };
             match v_slot {
             Value::Unreachable => Value::Unreachable,
-            Value::StringLiteral(_) => panic!("Type error: Assigning to string literal"),
-            Value::IntegerLiteral(_) => panic!("Type error: Assigning to integer literal"),
+            Value::StringLiteral(_)
+            |Value::IntegerLiteral(_)
+            |Value::FunctionPointer(..) => panic!("Type error: Assigning to literal"),
             Value::ImplicitUnit => panic!("Type error: Assigning to unit"),
             Value::Local(local_index, wrapper_list) => {
                 if !wrapper_list.is_empty() {
@@ -113,13 +114,9 @@ impl<'a,'b> Visitor<'a,'b> {
                 Value::ImplicitUnit
                 },
             Value::Named(absolute_path, wrapper_list) => {
-                if wrapper_list.is_empty() {
-                    todo!("Assign to named")
-                    //self.output.push_stmt(Operation::AssignNamed(absolute_path, v_value));
-                }
-                else {
-                    todo!("Assign to a named via wrappers?")
-                }
+                let tmp_local = self.output.allocate_slot(&crate::ast::Type::new_ptr(false, slot.data_ty.clone()));
+                self.output.push_stmt(Operation::BorrowGlobal(tmp_local, true, absolute_path, wrapper_list));
+                self.output.push_stmt(Operation::AssignDeref(tmp_local, v_value));
                 Value::ImplicitUnit
                 },
             Value::Deref { ptr, wrappers } => {
@@ -141,17 +138,17 @@ impl<'a,'b> Visitor<'a,'b> {
             use crate::ast::path::ValueBinding;
             match b {
             ValueBinding::Local(i) => Value::Local(super::LocalIndex(*i as _), Default::default()),
-            ValueBinding::Function(absolute_path) => todo!("function pointer"),
-            ValueBinding::DataEnumVariant(absolute_path, _) => todo!("function pointer"),
             ValueBinding::Static(ap) => Value::Named(ap.clone(), Default::default()),
             ValueBinding::Constant(absolute_path) => {
                 self.visit_expr( &self.parent.constants.get(absolute_path).expect("Missing constant?").e )
             },
-            ValueBinding::StructValue(absolute_path) => todo!("function pointer - struct"),
-            ValueBinding::ValueEnumVariant(absolute_path, idx) => {
+            ValueBinding::ValueEnumVariant(_absolute_path, idx) => {
                 // HACK: Assume that the variant isn't a data-holding variant
                 Value::IntegerLiteral(*idx as _)
                 },
+            ValueBinding::Function(absolute_path) => Value::FunctionPointer(absolute_path.clone(), super::FunctionPointerTy::Function),
+            ValueBinding::DataEnumVariant(absolute_path, idx) => Value::FunctionPointer(absolute_path.clone(), super::FunctionPointerTy::DataEnum(*idx)),
+            ValueBinding::StructValue(absolute_path) => Value::FunctionPointer(absolute_path.clone(), super::FunctionPointerTy::Struct),
             }
         },
         ExprKind::CallPath(path, binding, exprs) => {
@@ -160,18 +157,60 @@ impl<'a,'b> Visitor<'a,'b> {
             let Some(b) = binding else { panic!("Unresolved ExprKind::Callpath {:?}", path) };
             use crate::ast::path::ValueBinding;
             match b {
-            ValueBinding::Local(i) => todo!(),
+            ValueBinding::Local(i) => panic!("{}: Unexpected CallPath on a value - #{}", expr.span, i),
             ValueBinding::Function(absolute_path) => {
                 let next_block = self.output.new_block();
                 self.output.end_block(Terminator::CallPath(rv, next_block, absolute_path.clone(), a));
                 self.output.start_block(next_block);
             },
-            ValueBinding::Static(absolute_path) => todo!(),
-            ValueBinding::Constant(absolute_path) => todo!(),
-            ValueBinding::StructValue(absolute_path) => todo!(),
-            ValueBinding::DataEnumVariant(absolute_path, idx) => todo!("create data enum variant"),
+            ValueBinding::Static(absolute_path) => panic!("{}: Unexpected CallPath on a static - {}", expr.span, absolute_path),
+            ValueBinding::Constant(absolute_path) => panic!("{}: Unexpected CallPath on a constant - {}", expr.span, absolute_path),
+            ValueBinding::StructValue(absolute_path) => {
+                self.output.push_stmt(Operation::CreateComposite(rv, Some(absolute_path.clone()), a));
+            },
+            ValueBinding::DataEnumVariant(absolute_path, idx) => {
+                self.output.push_stmt(Operation::CreateDataVariant(rv, absolute_path.clone(), *idx, a));
+            },
             ValueBinding::ValueEnumVariant(absolute_path, _) => panic!("{}: Unexpected CallPath of value enum variant - {}", expr.span, absolute_path),
             }
+            Value::Local(rv, Default::default())
+        },
+        ExprKind::CallValue(fcn, args) => {
+            let rv = self.output.allocate_slot(&expr.data_ty);
+            let fcn_v = self.visit_expr(fcn);
+            let a: Vec<_> = args.iter().map(|e| self.visit_expr(e)).collect();
+            let fcn_local = match fcn_v {
+                Value::Unreachable => return Value::Unreachable,
+                Value::ImplicitUnit => panic!("{}: Unexpected CallValue on unit", expr.span),
+                Value::StringLiteral(_) => panic!("{}: Unexpected CallValue on string", expr.span),
+                Value::IntegerLiteral(_) => panic!("{}: Unexpected CallValue on an integer", expr.span),
+                Value::FunctionPointer(absolute_path, ty) => {
+                    match ty
+                    {
+                    crate::codegen::ir::FunctionPointerTy::Function => {
+                        let next_block = self.output.new_block();
+                        self.output.end_block(Terminator::CallPath(rv, next_block, absolute_path, a));
+                        self.output.start_block(next_block);
+                    },
+                    crate::codegen::ir::FunctionPointerTy::Struct => {
+                        self.output.push_stmt(Operation::CreateComposite(rv, Some(absolute_path), a));
+                    },
+                    crate::codegen::ir::FunctionPointerTy::DataEnum(idx) => {
+                        self.output.push_stmt(Operation::CreateDataVariant(rv, absolute_path, idx, a));
+                    }
+                    }
+                    return Value::Local(rv, Default::default())
+                    },
+                Value::Local(local_index, wrapper_list) if wrapper_list.is_empty() => local_index,
+                _ => {
+                    let tmp = self.output.allocate_slot(&fcn.data_ty);
+                    self.output.push_stmt(super::Operation::AssignLocal(tmp, fcn_v));
+                    tmp
+                }
+                };
+            let next_block = self.output.new_block();
+            self.output.end_block(Terminator::CallValue(rv, next_block, fcn_local, a));
+            self.output.start_block(next_block);
             Value::Local(rv, Default::default())
         },
         ExprKind::Tuple(exprs) => {
@@ -199,6 +238,7 @@ impl<'a,'b> Visitor<'a,'b> {
                 Value::Unreachable => None,
                 Value::ImplicitUnit => panic!("Type error: Indexing by unit"),
                 Value::StringLiteral(_) => panic!("Type error: Indexing by String"),
+                Value::FunctionPointer(..) => panic!("Type error: Indexing by function pointer"),
                 Value::IntegerLiteral(i) => Some(super::Wrapper::Field(i as usize)),
                 Value::Local(idx, wrappers) if wrappers.is_empty() =>
                     Some(super::Wrapper::IndexBySlot(idx)),
@@ -213,6 +253,7 @@ impl<'a,'b> Visitor<'a,'b> {
             (_,None) => Value::Unreachable,
             (Value::ImplicitUnit     ,_) => panic!("Type error: Indexing a unit"),
             (Value::IntegerLiteral(_),_) => panic!("Type error: Indexing an integer"),
+            (Value::FunctionPointer(..),_) => panic!("Type error: Indexing a function pointer"),
 
             (Value::StringLiteral(_),_) => todo!("Indexing a string?"),
             (Value::Local(local_index, mut wrapper_list),Some(w)) => {
@@ -239,10 +280,20 @@ impl<'a,'b> Visitor<'a,'b> {
                 self.output.push_stmt(Operation::BorrowLocal(rv, *is_mut, local_index, wrapper_list));
                 Value::Local(rv, Default::default())
             },
-            Value::Named(absolute_path, wrapper_list) => todo!(),
-            Value::Deref { .. } => todo!(),
+            Value::Named(absolute_path, wrapper_list) => {
+                let rv = self.output.allocate_slot(&expr.data_ty);
+                self.output.push_stmt(Operation::BorrowGlobal(rv, *is_mut, absolute_path, wrapper_list));
+                Value::Local(rv, Default::default())
+            },
+            Value::Deref { ptr, wrappers  } => {
+                let rv = self.output.allocate_slot(&expr.data_ty);
+                self.output.push_stmt(Operation::PointerOffset(rv, true, ptr, wrappers));
+                Value::Local(rv, Default::default())
+            },
             
-            Value::StringLiteral(_) | Value::IntegerLiteral(_) => {
+            Value::StringLiteral(_)
+            | Value::IntegerLiteral(_)
+            | Value::FunctionPointer(..) => {
                 let tmp = self.output.allocate_slot(&val_expr.data_ty);
                 self.output.push_stmt(Operation::AssignLocal(tmp, v));
                 let rv = self.output.allocate_slot(&expr.data_ty);
@@ -257,6 +308,7 @@ impl<'a,'b> Visitor<'a,'b> {
             Value::Unreachable => Value::Unreachable,
             Value::StringLiteral(_) => panic!("Deref of string literal?"),
             Value::IntegerLiteral(_) => panic!("Type error: Deref of integer"),
+            Value::FunctionPointer(..) => panic!("Type error: Deref of function pointer"),
             Value::ImplicitUnit => panic!("Type error: Deref of unit"),
             Value::Local(local_index, wrapper_list) if wrapper_list.is_empty() => {
                 Value::Deref { ptr: local_index, wrappers: Default::default() }
@@ -374,7 +426,6 @@ impl<'a,'b> Visitor<'a,'b> {
             }
             Value::Local( rv, Default::default() )
         },
-        ExprKind::CallValue(expr, exprs) => todo!(),
 
         ExprKind::Loop { body } => {
             let bb_head = self.output.new_block(); // No args?
@@ -566,16 +617,11 @@ impl<'a,'b> Visitor<'a,'b> {
                 self.output.end_block(super::Terminator::Compare(value, super::CmpOp::Eq, cv,  bb_true, bb_false));
                 return ;
             },
-            ValueBinding::ValueEnumVariant(_, var_idx) => {
+            ValueBinding::ValueEnumVariant(_, var_idx)|ValueBinding::DataEnumVariant(_, var_idx) => {
                 // Get the enum variant index
-                //TODO: The below is only valid for non-data enums
-                // Compare against this index
-                self.output.end_block(super::Terminator::Compare(value, super::CmpOp::Eq, super::Value::IntegerLiteral(*var_idx as u128),  bb_true, bb_false));
+                self.output.end_block(super::Terminator::MatchEnum(value, *var_idx,  bb_true, bb_false));
                 return ;
             },
-            ValueBinding::DataEnumVariant(_, var_idx) => {
-                todo!("{span}: Match data enum", span=pattern.span);
-                }
             }
         },
         PatternTy::Tuple(patterns) => {

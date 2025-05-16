@@ -235,7 +235,7 @@ fn resolve_type(item_scope: &ItemScope, ty: &mut crate::ast::Type)
     TypeKind::Array { inner, count } => {
         resolve_type(item_scope, inner);
         match count {
-        crate::ast::ty::ArraySize::Unevaluated(expr_root) => todo!("ArraySize::Unevaluated"),
+        crate::ast::ty::ArraySize::Unevaluated(expr_root) => todo!("ArraySize::Unevaluated - {:?}", expr_root),
         crate::ast::ty::ArraySize::Known(_) => {},
         }
     },

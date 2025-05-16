@@ -14,3 +14,14 @@ A design experiment on a "minimal rust", using rust's general syntax - but close
 - Generics (would need monomorph and traits)
 - Traits, because no generics
 - Borrows (and borrowchecker)
+
+
+# Comparison to C
+- Type inference
+- Modern syntax
+  - Sensible pointer syntax
+  - Trailing commas allowed
+  - Braces enforced, no parens required
+- No concept of "undefined behavior", although some behaviours can be unspecified
+  - This means that the compiler cannot assume that UB cannot happen
+  - but, what C would call UB will still do unexpected things (e.g. write to random memory)

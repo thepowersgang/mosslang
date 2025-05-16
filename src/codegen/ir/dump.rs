@@ -31,18 +31,31 @@ pub fn dump(dst: &mut dyn ::std::io::Write, src: &super::Expr) -> ::std::io::Res
                     write!(dst, ")")?;
                 }
             },
+            Operation::CreateDataVariant(local_index, absolute_path, idx, values) => {
+                write!(dst, "{} = {}#{} ( ", F(local_index), absolute_path, idx)?;
+                for a in values {
+                    write!(dst, "{}, ", F(a))?;
+                }
+                write!(dst, ")")?;
+            },
             Operation::BinOp(local_index, value, bin_op, value1)
                 => write!(dst, "{} = {} {} {}", F(local_index), F(value), F(bin_op), F(value1))?,
             Operation::UniOp(local_index, uni_op, value)
                 => write!(dst, "{} = {} {}", F(local_index), F(uni_op), F(value))?,
             Operation::BitShift(local_index, value, bit_shift, value1)
                 => write!(dst, "{} = {} {} {}", F(local_index), F(value), F(bit_shift), F(value1))?,
-            Operation::BorrowLocal(local_index, _, local_index1, wrapper_list)
-                => write!(dst, "{} = & {}{}", F(local_index), F(local_index1), F(wrapper_list))?,
-            Operation::PointerOffset(local_index, _, local_index1, wrapper_list)
-                => write!(dst, "{} = & (*{}){}", F(local_index), F(local_index1), F(wrapper_list))?,
+            Operation::BorrowLocal(local_index, is_mut, local_index1, wrapper_list)
+                => write!(dst, "{} = &{} {}{}", F(local_index), m(is_mut), F(local_index1), F(wrapper_list))?,
+            Operation::BorrowGlobal(local_index, is_mut, path, wrapper_list)
+                => write!(dst, "{} = &{} {}{}", F(local_index), m(is_mut), path, F(wrapper_list))?,
+            Operation::PointerOffset(local_index, is_mut, local_index1, wrapper_list)
+                => write!(dst, "{} = &{} (*{}){}", F(local_index), m(is_mut), F(local_index1), F(wrapper_list))?,
             }
             writeln!(dst, ";")?;
+
+            fn m(is_mut: &bool) -> &'static str {
+                if *is_mut { "mut" } else { "" }
+            }
         }
         write!(dst, "}} ")?;
         match &block.terminator {
@@ -50,8 +63,17 @@ pub fn dump(dst: &mut dyn ::std::io::Write, src: &super::Expr) -> ::std::io::Res
         Terminator::Return(value) => write!(dst, "return {}", F(value))?,
         Terminator::Compare(value, cmp_op, value1, block_index, block_index1)
             => write!(dst, "if {} {} {} {{ goto {} }} else {{ goto {} }}", F(value), F(cmp_op), F(value1), F(block_index), F(block_index1))?,
+        Terminator::MatchEnum(value, index, block_true, block_false)
+            => write!(dst, "if {} is #{} {{ goto {} }} else {{ goto {} }}", F(value), index, F(block_true), F(block_false))?,
         Terminator::CallPath(local_index, block_index, absolute_path, values) => {
             write!(dst, "{} = {}( ", F(local_index), absolute_path)?;
+            for a in values {
+                write!(dst, "{}, ", F(a))?;
+            }
+            write!(dst, ") goto {}", F(block_index))?;
+        },
+        Terminator::CallValue(local_index, block_index, fcn_ptr, values) => {
+            write!(dst, "{} = ({})( ", F(local_index), F(fcn_ptr))?;
             for a in values {
                 write!(dst, "{}, ", F(a))?;
             }
@@ -91,6 +113,9 @@ impl<'a> ::std::fmt::Display for F<'a, super::Value> {
         Value::Deref { ptr, wrappers } => write!(f, "*{}{}", F(ptr), F(wrappers)),
         Value::StringLiteral(string_literal) => write!(f, "{:?}", string_literal),
         Value::IntegerLiteral(v) => write!(f, "{:#x}", v),
+        Value::FunctionPointer(path, super::FunctionPointerTy::Function) => write!(f, "{}", path),
+        Value::FunctionPointer(path, super::FunctionPointerTy::Struct) => write!(f, "{}", path),
+        Value::FunctionPointer(path, super::FunctionPointerTy::DataEnum(idx)) => write!(f, "{}#{}", path, idx),
         }
     }
 }

@@ -163,8 +163,16 @@ fn parse_expr_assign(lex: &mut super::Lexer) -> super::Result<e::Expr> {
     }
     match lex.peek_no_eof()? {
     Token::Punct(Punct::Equals) => op_equals(lex, ps, lhs, None),
-    Token::Punct(Punct::PlusEquals) => op_equals(lex, ps, lhs, Some(AssignOp::Add)),
+    Token::Punct(Punct::PlusEquals ) => op_equals(lex, ps, lhs, Some(AssignOp::Add)),
     Token::Punct(Punct::MinusEquals) => op_equals(lex, ps, lhs, Some(AssignOp::Sub)),
+    Token::Punct(Punct::SlashEquals) => op_equals(lex, ps, lhs, Some(AssignOp::Div)),
+    Token::Punct(Punct::StarEquals ) => op_equals(lex, ps, lhs, Some(AssignOp::Mul)),
+    Token::Punct(Punct::PercentEquals) => op_equals(lex, ps, lhs, Some(AssignOp::Rem)),
+    Token::Punct(Punct::PipeEquals)  => op_equals(lex, ps, lhs, Some(AssignOp::BitOr )),
+    Token::Punct(Punct::AmpEquals)   => op_equals(lex, ps, lhs, Some(AssignOp::BitAnd)),
+    Token::Punct(Punct::CaretEquals) => op_equals(lex, ps, lhs, Some(AssignOp::BitXor)),
+    Token::Punct(Punct::DoubleLtEquals) => op_equals(lex, ps, lhs, Some(AssignOp::Shl)),
+    Token::Punct(Punct::DoubleGtEquals) => op_equals(lex, ps, lhs, Some(AssignOp::Shr)),
     _ => Ok(lhs),
     }
 }
