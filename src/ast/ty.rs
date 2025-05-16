@@ -86,7 +86,6 @@ impl Type
         },
         TypeKind::Bool => f.write_str("bool"),
         TypeKind::Void => f.write_str("void"),
-        TypeKind::NullPointer => f.write_str("nullptr_t"),
         TypeKind::Integer(int_class) => match int_class
             {
             IntClass::PtrInt => f.write_str("usize"),
@@ -250,10 +249,6 @@ pub enum TypeKind
     Tuple(Vec<Type>),
     /// A named type
     Named(super::Path, Option<super::path::TypeBinding>),
-    /// Type returned by the integer literal `0p`
-    /// 
-    /// Can coerce to any pointer type
-    NullPointer,
     /// Pointer to data
     Pointer {
         is_const: bool,

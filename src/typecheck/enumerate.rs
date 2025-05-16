@@ -23,7 +23,6 @@ impl<'a> IvarEnumerate<'a> {
         TypeKind::Named(_, _) => {},
         TypeKind::Void => {},
         TypeKind::Bool => {},
-        TypeKind::NullPointer => {},
 
         TypeKind::Tuple(items) => {
             for t in items {

@@ -42,7 +42,6 @@ impl<'a> Visitor<'a> {
         TypeKind::Void => {},
         TypeKind::Bool => {},
         TypeKind::Integer(..) => {},
-        TypeKind::NullPointer => {},
         
         TypeKind::Named(..) => {},
 
