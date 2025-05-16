@@ -42,6 +42,7 @@ pub enum ExprKind
     Block(Block),
     LiteralString(crate::ast::StringLiteral),
     LiteralInteger(u128, IntLitClass),
+    TypeInfoSizeOf(super::Type),
 
     Return(Option<Box<Expr>>),
     Continue,
@@ -56,7 +57,7 @@ pub enum ExprKind
     NamedValue(super::Path, Option<super::path::ValueBinding>),
     CallPath(super::Path, Option<super::path::ValueBinding>, Vec<Expr>),
     Tuple(Vec<Expr>),
-    //Struct(super::Path, Vec<Expr>),
+    Struct(super::Path, Option<super::path::TypeBinding>, Vec<(crate::Ident,Expr)>),
 
     FieldNamed(Box<Expr>, crate::Ident),
     FieldIndex(Box<Expr>, usize),
@@ -108,6 +109,8 @@ impl<'a> ::core::fmt::Debug for ExprKind {
             write!(f, "LiteralString({:?})", s),
         ExprKind::LiteralInteger(v, int_lit_class) =>
             write!(f, "LiteralInteger({}, {:?})", v, int_lit_class),
+        ExprKind::TypeInfoSizeOf(ty) =>
+            write!(f, "TypeInfoSizeOf({:?})", ty),
         ExprKind::Return(expr) =>
             write!(f, "Return({})", if expr.is_none() { "void" } else { "..." }),
         ExprKind::Continue =>
@@ -138,6 +141,13 @@ impl<'a> ::core::fmt::Debug for ExprKind {
                 f.write_str("..., ")?;
             }
             f.write_str(")")
+        },
+        ExprKind::Struct(ty, binding, exprs) => {
+            write!(f, "Struct({:?} [{:?}] {{ ", ty, binding)?;
+            for (name,_) in exprs {
+                write!(f, "{}: ..., ", name)?;
+            }
+            f.write_str("})")
         },
         ExprKind::FieldNamed(_expr, ident) =>
             write!(f, "(...).{}", ident),

@@ -312,7 +312,25 @@ fn parse_expr_value(lex: &mut super::Lexer) -> super::Result<e::Expr> {
     let ps = lex.start_span();
     if let Some(p) = super::opt_parse_path(lex)? {
         return Ok(if !lex.has_flag(super::lex::Flag::NoStructLiteral) && lex.opt_consume_punct(Punct::BraceOpen)? {
-            todo!("parse_expr_value - struct literal")
+            let mut values = Vec::new();
+            while ! lex.opt_consume_punct(Punct::BraceClose)? {
+
+                if lex.opt_consume_punct(Punct::DoubleDot)? {
+                    todo!("Struct template/default")
+                }
+
+                let name = lex.consume_ident()?;
+                lex.consume_punct(Punct::Colon)?;
+                let val = parse_expr(lex)?;
+                values.push((name, val));
+
+                if ! lex.opt_consume_punct(Punct::Comma)? {
+                    lex.consume_punct(Punct::BraceClose)?;
+                    break;
+                }
+            }
+
+            e::ExprKind::Struct(p, None, values).to_expr(lex.end_span(&ps))
         }
         else if lex.opt_consume_punct(Punct::ParenOpen)? {
             let mut args = Vec::new();
@@ -325,8 +343,10 @@ fn parse_expr_value(lex: &mut super::Lexer) -> super::Result<e::Expr> {
                     break;
                 }
             }
-            println!("{:?}", lex.peek());
             e::ExprKind::CallPath(p, None, args).to_expr(lex.end_span(&ps))
+        }
+        else if lex.opt_consume_punct(Punct::Bang)? {
+            todo!("{}: Rust macro?", lex.end_span(&ps));
         }
         else {
             e::ExprKind::NamedValue(p, None).to_expr(lex.end_span(&ps))
@@ -356,6 +376,13 @@ fn parse_expr_value(lex: &mut super::Lexer) -> super::Result<e::Expr> {
         super::lex::Literal::Float(v, cls) => todo!("Float literal: {:?} {:?}", v, cls),
         }.to_expr(lex.end_span(&ps))
         },
+    Token::RWord(ReservedWord::Sizeof) => {
+        lex.consume();
+        lex.consume_punct(Punct::ParenOpen)?;
+        let ty = super::ty::parse_type(lex)?;
+        lex.consume_punct(Punct::ParenClose)?;
+        e::ExprKind::TypeInfoSizeOf(ty).to_expr(lex.end_span(&ps))
+    },
     Token::Punct(Punct::ParenOpen) => {
         lex.consume();
         let rv = parse_expr(lex)?;
@@ -505,6 +532,6 @@ fn parse_expr_value(lex: &mut super::Lexer) -> super::Result<e::Expr> {
             branches,
             }.to_expr(lex.end_span(&ps))
         },
-    t => todo!("parse_expr_value - {:?}", t),
+    t => todo!("{}: parse_expr_value - {:?}", ps, t),
     })
 }

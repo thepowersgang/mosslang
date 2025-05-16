@@ -401,22 +401,91 @@ impl RawLexer
     /// Read escaped string data until an ending character
     fn get_token_string_inner(&mut self, end: char) -> ::std::io::Result<Vec<u8>> {
         let mut rv = Vec::new();
+        enum StrIndent {
+            None,
+            CountUp(u32),
+            Set(u32),
+            CountDown(u32, u32),
+        }
+        let mut indent = StrIndent::None;
+        fn set_newline(indent: &mut StrIndent) {
+            *indent = match *indent {
+                StrIndent::None => StrIndent::CountUp(0),
+                StrIndent::CountUp(c)
+                |StrIndent::Set(c)
+                |StrIndent::CountDown(_, c) => StrIndent::CountDown(c,c),
+            };
+        }
         loop {
             match self.advance_no_eof()? {
             '\\' => match self.advance_no_eof()? {
+                '0' => rv.push(0),
                 't' => rv.push(8),
                 'n' => rv.push(10),
                 'r' => rv.push(13),
-                c => todo!("Escape code '\\{}'", c),
+                '"' => rv.push(b'"'),
+                '\\' => rv.push(b'\\'),
+                '\r' => {
+                    // Escaped newline: Just don't emit
+                    if self.advance()? == Some('\n') {
+                        // Also skip 
+                    }
+                    else {
+                        self.un_advance();
+                    }
+                    set_newline(&mut indent);
+                }
+                '\n' => {
+                    // Escaped newline: Just don't emit
+                    set_newline(&mut indent);
                 },
+                c => todo!("{}: Escape code '\\' {:?}", self.point_span(), c),
+                },
+            '\n' => {
+                rv.push(b'\n');
+                set_newline(&mut indent);
+            }
+            '\r' => {
+                rv.push(b'\r');
+                if self.advance()? == Some('\n') { 
+                    rv.push(b'\n');
+                }
+                else {
+                    self.un_advance();
+                }
+                set_newline(&mut indent);
+            }
+
+            ' ' => {
+                match &mut indent {
+                StrIndent::CountUp(c) => *c += 1,
+                StrIndent::CountDown(c, t) => {
+                    if *c == 0 {
+                        rv.push(b' ');
+                        indent = StrIndent::Set(*t);
+                    }
+                    else {
+                        *c -= 1;
+                    }
+                }
+                _ => rv.push(b' '),
+                }
+            }
             c if c == end => break,
             c => {
+                indent = match indent {
+                    StrIndent::None => StrIndent::None,
+                    StrIndent::CountUp(c)
+                    |StrIndent::Set(c)
+                    |StrIndent::CountDown(_, c) => StrIndent::Set(c),
+                };
                 let mut buf = [0; 4];
                 rv.extend(c.encode_utf8(&mut buf).bytes())
                 },
             }
         }
         self.advance()?;    // Move away from the closing quote
+        println!(">> {:?}", String::from_utf8_lossy(&rv));
         Ok(rv)
     }
     /// Advance, but painic if EOF is seen

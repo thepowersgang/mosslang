@@ -44,6 +44,9 @@ fn parse_pattern_inner(lex: &mut Lexer, mut bindings: Vec<PatternBinding>) -> Re
             pats.push(parse_pattern_inner(lex, Vec::new())?);
             if !lex.opt_consume_punct(lex::Punct::Comma)? {
                 lex.consume_punct(lex::Punct::ParenClose)?;
+                if pats.len() == 1 {
+                    return Ok(pats.into_iter().next().unwrap());
+                }
                 break;
             }
         }
@@ -63,7 +66,11 @@ fn parse_pattern_inner(lex: &mut Lexer, mut bindings: Vec<PatternBinding>) -> Re
             Pattern { span: lex.end_span(&ps), bindings, ty: PatternTy::Any, data_ty: crate::ast::Type::new_infer()  }
         }
     }
+    // TODO: Integer patterns (with ranges, and `|`)
     else {
-        todo!("parse_pattern - {:?}", lex.peek());
+        //match lex.peek_no_eof()? {
+        //lex::Token::Literal(lex::Literal::Integer(, ))
+        //}
+        todo!("{}: parse_pattern - {:?}", ps, lex.peek());
     })
 }

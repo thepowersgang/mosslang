@@ -52,8 +52,12 @@ impl Lexer {
     }
     
     /// Emit an error if the current token isn't expected
+    #[track_caller]
     pub fn unexpected(&self) -> super::Error {
-        todo!("Unexpected token error");
+        match &self.cur {
+        None => panic!("Unexpected end of file"),
+        Some((sp,t,_sp_after)) => panic!("{}: Unexpected token {:?}", sp, t),
+        }
     }
 
     /// Check the current token
@@ -105,11 +109,12 @@ impl Lexer {
         }
     }
     /// Consume the current token, asserting that it is a given punctuation token
+    #[track_caller]
     pub fn consume_punct(&mut self, exp: Punct) -> super::Result<()> {
         match self.consume_with_span() {
         Some((_, Token::Punct(p))) if p == exp => Ok(()),
         None => todo!("EOF error"),
-        Some((sp, t)) => todo!("{}: Error: Expected {:?}, got {:?}", sp, exp, t),
+        Some((sp, t)) => todo!("{}: Expected {:?}, got {:?}", sp, exp, t),
         }
     }
     /// Check if the current token is a given punctuation token, consuming if it is
@@ -131,11 +136,12 @@ impl Lexer {
         Some(_) => Ok(false),
         }
     }
+    #[track_caller]
     pub fn consume_rword(&mut self, exp: ReservedWord) -> super::Result<()> {
         match self.consume_with_span() {
         Some((_, Token::RWord(have))) if have == exp => Ok(()),
         None => todo!("EOF error"),
-        Some((sp, t)) => todo!("{}: Error: Expected {:?}, got {:?}", sp, exp, t),
+        Some((sp, t)) => todo!("{}: Expected {:?}, got {:?}", sp, exp, t),
         }
     }
     pub fn opt_consume_rword(&mut self, exp: ReservedWord) -> super::Result<bool> {
@@ -149,10 +155,10 @@ impl Lexer {
     }
 
     pub fn consume_ident(&mut self) -> super::Result<Ident> {
-        match self.consume() {
-        Some(Token::Ident(i)) => Ok(i),
+        match self.consume_with_span() {
+        Some((_, Token::Ident(i))) => Ok(i),
         None => todo!("EOF error"),
-        Some(t) => todo!("Error: Expected ident, got {:?}", t),
+        Some((sp, t)) => todo!("{sp}: Expected ident, got {:?}", t),
         }
     }
     pub fn opt_consume_ident(&mut self) -> super::Result<Option<Ident>> {
@@ -163,11 +169,12 @@ impl Lexer {
         }
     }
 
+    #[track_caller]
     pub fn consume_string(&mut self) -> super::Result< crate::ast::StringLiteral > {
-        match self.consume() {
-        Some(Token::Literal(Literal::String(i))) => Ok(i),
+        match self.consume_with_span() {
+        Some((_,Token::Literal(Literal::String(i)))) => Ok(i),
         None => todo!("EOF error"),
-        Some(t) => todo!("Error: Expected ident, got {:?}", t),
+        Some((sp, t)) => todo!("{sp}: Expected ident, got {:?}", t),
         }
     }
     pub fn opt_consume_string(&mut self) -> super::Result<Option< crate::ast::StringLiteral >> {
@@ -239,6 +246,9 @@ pub enum ReservedWord {
     #[strum(to_string="self")]
     Self_,
     Super,
+
+    Sizeof,
+    Typeof,
 }
 macro_rules! define_punct {
     ( $( $name:ident => $($l:literal)* ),* $(,)? ) => {

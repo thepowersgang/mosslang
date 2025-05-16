@@ -36,6 +36,7 @@ impl<'a> IvarEnumerate<'a> {
         TypeKind::Array { inner, count: _ } => {
             self.fill_ivars_in(inner);
         },
+        TypeKind::TypeOf(inner) => todo!("Recurse into expression for `TypeOf`?"),
         }
     }
 }
@@ -251,6 +252,7 @@ impl<'a, 'b> crate::ast::ExprVisitor for RuleEnumerate<'a, 'b> {
             IntLitClass::Integer(int_class) => self.equate_types(&expr.span, &expr.data_ty, &Type::new_integer(*int_class)),
             }
         }
+        ExprKind::TypeInfoSizeOf(_) => self.equate_types(&expr.span, &expr.data_ty, &Type::new_integer(crate::ast::ty::IntClass::PtrInt)),
         ExprKind::Return(value) => {
             if let Some(expr) = value {
                 self.equate_types(&expr.span, self.ret_ty, &expr.data_ty);
@@ -348,6 +350,9 @@ impl<'a, 'b> crate::ast::ExprVisitor for RuleEnumerate<'a, 'b> {
             let ty = Type::new_tuple( exprs.iter().map(|e| e.data_ty.clone()).collect() );
             self.equate_types(&expr.span, &expr.data_ty, &ty);
         },
+        ExprKind::Struct(name, binding, values) => {
+            todo!("Enumerate rules for struct literal")
+        }
         ExprKind::FieldNamed(expr_v, ident) => {
             self.push_revisit(&expr.span, &expr.data_ty, Revisit::FieldNamed(expr_v.data_ty.clone(), ident.clone()));
         },

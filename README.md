@@ -25,3 +25,9 @@ A design experiment on a "minimal rust", using rust's general syntax - but close
 - No concept of "undefined behavior", although some behaviours can be unspecified
   - This means that the compiler cannot assume that UB cannot happen
   - but, what C would call UB will still do unexpected things (e.g. write to random memory)
+
+# Open questions
+- Should formatting be improved?
+- Should autoderef be available?
+  - Currently using `.*.` in place of C's `->`
+- Slices?

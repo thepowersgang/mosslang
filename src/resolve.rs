@@ -235,10 +235,13 @@ fn resolve_type(item_scope: &ItemScope, ty: &mut crate::ast::Type)
     TypeKind::Array { inner, count } => {
         resolve_type(item_scope, inner);
         match count {
-        crate::ast::ty::ArraySize::Unevaluated(expr_root) => todo!("ArraySize::Unevaluated - {:?}", expr_root),
+        crate::ast::ty::ArraySize::Unevaluated(expr_root) => resolve_expr(item_scope, expr_root, &mut []),
         crate::ast::ty::ArraySize::Known(_) => {},
         }
     },
+    TypeKind::TypeOf(expr) => {
+        resolve_expr(item_scope, &mut expr.0, &mut []);
+    }
     }
 }
 
@@ -282,7 +285,7 @@ fn resolve_expr(item_scope: &ItemScope, expr: &mut crate::ast::ExprRoot, args: &
             }
         }
 
-        fn resolve_path_value(&self, p: &mut crate::ast::Path) -> crate::ast::path::ValueBinding {
+        fn resolve_path_value(&self, span: &crate::parser::lex::Span, p: &mut crate::ast::Path) -> crate::ast::path::ValueBinding {
             assert!(matches!(p.root, crate::ast::path::Root::None));
             let c = p.components.first().expect("Empty path?");
             if p.components.len() == 2 {
@@ -307,7 +310,7 @@ fn resolve_expr(item_scope: &ItemScope, expr: &mut crate::ast::ExprRoot, args: &
                     return v.clone();
                 }
             }
-            todo!("Resolve path {:?}", p);
+            todo!("{}: Resolve path {:?}", span, p);
         }
     }
     impl crate::ast::ExprVisitor for Context<'_> {
@@ -337,7 +340,7 @@ fn resolve_expr(item_scope: &ItemScope, expr: &mut crate::ast::ExprRoot, args: &
                 p.ty = PatternTy::Any;
             },
             PatternTy::NamedValue(path, binding) => {
-                *binding = Some(self.resolve_path_value(path));
+                *binding = Some(self.resolve_path_value(&p.span, path));
             },
             PatternTy::Tuple(patterns) => {
                 for p in patterns {
@@ -351,10 +354,10 @@ fn resolve_expr(item_scope: &ItemScope, expr: &mut crate::ast::ExprRoot, args: &
             let expr_p: *const _ = expr;
             match &mut expr.kind {
             ExprKind::CallPath(p, binding, ..) => {
-                *binding = Some(self.resolve_path_value(p));
+                *binding = Some(self.resolve_path_value(&expr.span, p));
                 },
             ExprKind::NamedValue(p, binding) => {
-                *binding = Some(self.resolve_path_value(p));
+                *binding = Some(self.resolve_path_value(&expr.span, p));
                 println!("{INDENT}NamedValue: {:?} = {:?} @ {:p}", p, binding.as_ref().unwrap(), expr_p);
                 },
             ExprKind::Cast(_, ty) => resolve_type(self.item_scope, ty),

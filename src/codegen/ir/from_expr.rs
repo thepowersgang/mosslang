@@ -52,6 +52,7 @@ impl<'a,'b> Visitor<'a,'b> {
 
         ExprKind::LiteralString(data) => super::Value::StringLiteral(data.clone()),
         ExprKind::LiteralInteger(v, _int_lit_class) => super::Value::IntegerLiteral(*v),
+        ExprKind::TypeInfoSizeOf(_) => todo!(),
 
         ExprKind::Return(expr) => {
             let e = if let Some(expr) = expr { self.visit_expr(expr) } else { Value::ImplicitUnit };
@@ -219,6 +220,9 @@ impl<'a,'b> Visitor<'a,'b> {
             self.output.push_stmt(super::Operation::CreateComposite(rv, None, a));
             Value::Local(rv, Default::default())
         },
+        ExprKind::Struct(_, binding, values) => {
+            todo!();
+        }
         ExprKind::FieldNamed(expr, ident) => {
             let v = self.visit_expr(expr);
             let data_ty = match &expr.data_ty.kind {

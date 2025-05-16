@@ -4,6 +4,7 @@ use super::lex;
 use crate::ast::Type;
 
 pub fn parse_type(lex: &mut Lexer) -> Result<crate::ast::Type> {
+    let ps = lex.start_span();
     if let Some(p) = super::opt_parse_path(lex)? {
         if p.is_trivial() {
             use crate::ast::ty::IntClass;
@@ -60,7 +61,11 @@ pub fn parse_type(lex: &mut Lexer) -> Result<crate::ast::Type> {
             //if lex.opt_consume_punct(lex::Punct::Semicolon)? {
                 let count = super::expr::parse_root_expr(lex)?;
                 lex.consume_punct(lex::Punct::SquareClose)?;
-                Ok( Type::new_array(inner, count) )
+                Ok(match count.e.kind
+                    {
+                    crate::ast::expr::ExprKind::LiteralInteger(v, _) if v < usize::MAX as u128 => Type::new_array_fixed(inner, v as usize),
+                    _ => Type::new_array(inner, count),
+                    })
             //}
             //else {
             //    lex.consume_punct(lex::Punct::SquareClose)?;
@@ -81,7 +86,11 @@ pub fn parse_type(lex: &mut Lexer) -> Result<crate::ast::Type> {
             let inner = parse_type(lex)?;
             Ok( Type::new_ptr(is_const, inner) )
             },
-        t => todo!("parse_type - {:?}", t),
+        lex::Token::RWord(lex::ReservedWord::Typeof) => {
+            let e = super::parse_root_expr(lex)?;
+            Ok( Type::new_typeof(e) )
+            },
+        t => todo!("{}: parse_type - {:?}", ps, t),
         }
     }
 }

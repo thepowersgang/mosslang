@@ -286,5 +286,6 @@ fn equate_type_kind(ivars: &mut [IVarEnt], l: &TypeKind, r: &TypeKind) -> Result
         Ok( () )
     },
     (TypeKind::Array { .. }, _) => Err((l.clone(),r.clone())),
+    (TypeKind::TypeOf(..), _) => todo!("Handle equality between typeof"),
     }
 }

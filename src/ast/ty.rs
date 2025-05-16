@@ -44,6 +44,11 @@ impl Type
         }
     }
 
+    pub fn new_typeof(expr: super::ExprRoot) -> Self {
+        Type {
+            kind: TypeKind::TypeOf(ExprInType(Box::new(expr))),
+        }
+    }
     pub fn new_ptr(is_const: bool, inner: Type) -> Self {
         Type {
             kind: TypeKind::Pointer { is_const, inner: Box::new(inner) }
@@ -52,6 +57,11 @@ impl Type
     pub fn new_array(inner: Type, count: crate::ast::ExprRoot) -> Self {
         Type {
             kind: TypeKind::Array { inner: Box::new(inner), count: ArraySize::Unevaluated(Box::new(count)), }
+        }
+    }
+    pub fn new_array_fixed(inner: Type, count: usize) -> Self {
+        Type {
+            kind: TypeKind::Array { inner: Box::new(inner), count: ArraySize::Known(count), }
         }
     }
     //pub fn new_slice(inner: Type) -> Self {
@@ -128,6 +138,9 @@ impl Type
             }
             f.write_str("]")
         },
+        TypeKind::TypeOf(inner) => {
+            write!(f, "typeof({:?})", inner.0)
+        }
         }
     }
 }
@@ -164,7 +177,7 @@ pub enum ArraySize {
 impl Clone for ArraySize {
     fn clone(&self) -> Self {
         match *self {
-        Self::Unevaluated(_) => todo!("Clone unevaluated array size"),
+        Self::Unevaluated(ref a) => todo!("{}: Clone unevaluated array size", a.e.span),
         Self::Known(s) => Self::Known(s),
         }
     }
@@ -189,6 +202,31 @@ impl Ord for ArraySize {
         (Self::Known(l0), Self::Known(r0)) => l0.cmp(r0),
         (Self::Known(_), _) => ::std::cmp::Ordering::Greater,
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct ExprInType(pub Box<super::ExprRoot>);
+impl Clone for ExprInType {
+    fn clone(&self) -> Self {
+        todo!("Clone expression in type")
+    }
+}
+impl Eq for ExprInType {
+}
+impl PartialEq for ExprInType {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == ::std::cmp::Ordering::Equal
+    }
+}
+impl PartialOrd for ExprInType {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl Ord for ExprInType {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        todo!("Compare `ExprInType`")
     }
 }
 
@@ -225,7 +263,8 @@ pub enum TypeKind
     Array {
         inner: Box<Type>,
         count: ArraySize,
-    }
+    },
+    TypeOf(ExprInType),
 }
 #[derive(Clone,Debug)]
 #[derive(PartialOrd,Ord,PartialEq,Eq)]

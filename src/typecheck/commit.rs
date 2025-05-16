@@ -53,6 +53,7 @@ impl<'a> Visitor<'a> {
         },
         TypeKind::Pointer { is_const: _, inner } => self.commit_ivars_in(span, inner),
         TypeKind::Array { inner, count: _ } => self.commit_ivars_in(span, inner),
+        TypeKind::TypeOf(_) => todo!("Commit ivars in typeof")
         }
     }
 }

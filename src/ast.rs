@@ -101,6 +101,7 @@ pub fn visit_mut_expr(c: &mut dyn ExprVisitor, expr: &mut crate::ast::expr::Expr
     ExprKind::Block(block) => c.visit_mut_block(block),
     ExprKind::LiteralString(_)
     |ExprKind::LiteralInteger(_, _) => {},
+    ExprKind::TypeInfoSizeOf(_) => {},
 
     ExprKind::Continue => {},
     ExprKind::Return(expr)
@@ -120,6 +121,11 @@ pub fn visit_mut_expr(c: &mut dyn ExprVisitor, expr: &mut crate::ast::expr::Expr
     },
     ExprKind::Tuple(exprs) => {
         for e in exprs {
+            c.visit_mut_expr(e);
+        }
+    },
+    ExprKind::Struct(_, _, values) => {
+        for (_,e) in values {
             c.visit_mut_expr(e);
         }
     },
