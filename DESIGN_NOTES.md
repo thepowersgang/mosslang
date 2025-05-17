@@ -3,13 +3,13 @@ Project name:
 - "rust--" - Trademark issues - it's not rust
 - "r--" - R is another language, nope.
 - "rs--" - Nah...
-- "moss" - It's an older and stickier fungus :D
+- "moss" - It's an sticky fungus :D
 
 A modern C, but with rust-like syntax
-- Full rust syntax (use `syn`'s parser?)
+- Very close to full rust syntax 
   - Add post-fix deref syntax to make derefs explicit, but still ergonomic
+  - For loops need thought, for now they're just magic syntax
 - Aim for C ABI compatability
-  - 
 
 ## Goals
 - A simple language spec (close to C)
@@ -24,10 +24,11 @@ A modern C, but with rust-like syntax
 ## Non-Features
 - Trait generics, too much effort to implement
   - Duck-typed generics are possible, although they make parts of inference harder. C++ has to monomorphise to do type resolution.
-  - No generics would fall into the trap Go found.
+  - Although, no generics would fall into the trap Go found.
+  - But this isn't mean for the same things as Go
 - Trait objects - if you want vtables, do it yourself
 - Operator overrides - messy without traits to control them.
-- Borrow checker
+- Borrow checker - obviously
 
 
 # Questions
