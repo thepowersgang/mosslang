@@ -350,7 +350,27 @@ impl<'a, 'b> crate::ast::ExprVisitor for RuleEnumerate<'a, 'b> {
             self.equate_types(&expr.span, &expr.data_ty, &ty);
         },
         ExprKind::Struct(name, binding, values) => {
-            todo!("Enumerate rules for struct literal - {:?}", binding)
+            let Some(binding) = binding else { panic!("{}Unresolved Struct", expr.span) };
+            use crate::ast::path::TypeBinding;
+            match binding {
+            TypeBinding::Alias(_) => panic!("{}Unexpected use of a type alias for struct literal", expr.span),
+            TypeBinding::ValueEnum(_) => todo!(),
+            TypeBinding::DataEnum(_) => todo!(),
+
+            TypeBinding::Union(absolute_path) => todo!("{}struct literal - union", expr.span),
+            TypeBinding::Struct(absolute_path) => {
+                let Some(fields) = self.lc.fields.get(&absolute_path) else { panic!("{}Struct {} not in lookup context", expr.span, absolute_path) };
+                for (fld_name,fld_value) in values.iter_mut() {
+                    let Some(fld_def) = fields.get(&fld_name) else {
+                        panic!("{}Field {} not found in struct {}", fld_value.span, fld_name, absolute_path);
+                    };
+                    self.equate_types(&fld_value.span, fld_def, &fld_value.data_ty);
+                }
+            },
+            TypeBinding::EnumVariant(absolute_path, _) => todo!("{}struct literal - enum variant?", expr.span),
+            }
+            let ty = Type { kind: TypeKind::Named(name.clone(), Some(binding.clone())), span: expr.span.clone() };
+            self.equate_types(&expr.span, &expr.data_ty, &ty);
         }
         ExprKind::FieldNamed(expr_v, ident) => {
             self.push_revisit(&expr.span, &expr.data_ty, Revisit::FieldNamed(expr_v.data_ty.clone(), ident.clone()));
