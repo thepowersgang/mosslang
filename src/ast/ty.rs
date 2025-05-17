@@ -1,70 +1,98 @@
 #[derive(Clone)]
-#[derive(PartialOrd,Ord,PartialEq,Eq)]
 pub struct Type
 {
+    pub span: crate::Span,
     pub kind: TypeKind,
+}
+impl PartialOrd for Type {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.kind.partial_cmp(&other.kind)
+    }
+}
+impl Ord for Type {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.kind.cmp(&other.kind)
+    }
+}
+impl PartialEq for Type {
+    fn eq(&self, other: &Self) -> bool {
+        self.kind == other.kind
+    }
+}
+impl Eq for Type {
 }
 impl Type
 {
-    pub fn new_void() -> Self {
+    pub fn new_void(span: crate::Span) -> Self {
         Type {
             kind: TypeKind::Void,
+            span,
         }
     }
-    pub fn new_unit() -> Self {
+    pub fn new_unit(span: crate::Span) -> Self {
         Type {
             kind: TypeKind::Tuple(vec![]),
+            span,
         }
     }
-    pub fn new_infer() -> Self {
+    pub fn new_infer(span: crate::Span) -> Self {
         Type {
             kind: TypeKind::Infer { index: None, kind: InferKind::None },
+            span,//: crate::Span::new_null(),
         }
     }
-    pub fn new_path(p: super::Path) -> Self {
+    pub fn new_path(span: crate::Span, p: super::Path) -> Self {
         Type {
             kind: TypeKind::Named(p, None),
+            span,
         }
     }
     
-    pub fn new_tuple(inner: Vec<Type>) -> Self {
+    pub fn new_tuple(span: crate::Span, inner: Vec<Type>) -> Self {
         Type {
             kind: TypeKind::Tuple(inner),
+            span,
         }
     }
     
-    pub fn new_bool() -> Self {
+    pub fn new_bool(span: crate::Span) -> Self {
         Type {
             kind: TypeKind::Bool,
+            span,
         }
     }
-    pub fn new_integer(cls: IntClass) -> Self {
+    pub fn new_integer(span: crate::Span, cls: IntClass) -> Self {
         Type {
             kind: TypeKind::Integer(cls),
+            span,
         }
     }
 
-    pub fn new_typeof(expr: super::ExprRoot) -> Self {
+    pub fn new_typeof(span: crate::Span, expr: super::ExprRoot) -> Self {
         Type {
             kind: TypeKind::TypeOf(ExprInType(Box::new(expr))),
+            span,
         }
     }
-    pub fn new_ptr(is_const: bool, inner: Type) -> Self {
+    pub fn new_ptr(span: crate::Span, is_const: bool, inner: Type) -> Self {
         Type {
-            kind: TypeKind::Pointer { is_const, inner: Box::new(inner) }
+            kind: TypeKind::Pointer { is_const, inner: Box::new(inner) },
+            span,
         }
     }
-    pub fn new_array(inner: Type, count: crate::ast::ExprRoot) -> Self {
+    pub fn new_array_expr(span: crate::Span, inner: Type, count: crate::ast::ExprRoot) -> Self {
         Type {
-            kind: TypeKind::Array { inner: Box::new(inner), count: ArraySize::Unevaluated(Box::new(count)), }
+            kind: TypeKind::Array { inner: Box::new(inner), count: ArraySize::Unevaluated(Box::new(count)), },
+            span,
         }
     }
-    pub fn new_array_fixed(inner: Type, count: usize) -> Self {
+    pub fn new_array_fixed(span: crate::Span, inner: Type, count: usize) -> Self {
         Type {
-            kind: TypeKind::Array { inner: Box::new(inner), count: ArraySize::Known(count), }
+            kind: TypeKind::Array { inner: Box::new(inner), count: ArraySize::Known(count), },
+            span,
         }
     }
-    //pub fn new_slice(inner: Type) -> Self {
+    //pub fn new_slice(span: crate::Span, inner: Type) -> Self {
     //    Type {}
     //}
 

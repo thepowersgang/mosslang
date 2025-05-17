@@ -105,7 +105,7 @@ impl<'a,'b> Visitor<'a,'b> {
             Value::ImplicitUnit => panic!("Type error: Assigning to unit"),
             Value::Local(local_index, wrapper_list) => {
                 if !wrapper_list.is_empty() {
-                    let tmp_local = self.output.allocate_slot(&crate::ast::Type::new_ptr(false, slot.data_ty.clone()));
+                    let tmp_local = self.output.allocate_slot(&crate::ast::Type::new_ptr(crate::Span::new_null(), false, slot.data_ty.clone()));
                     self.output.push_stmt(Operation::BorrowLocal(tmp_local, true, local_index, wrapper_list));
                     self.output.push_stmt(Operation::AssignDeref(tmp_local, v_value));
                 }
@@ -115,14 +115,14 @@ impl<'a,'b> Visitor<'a,'b> {
                 Value::ImplicitUnit
                 },
             Value::Named(absolute_path, wrapper_list) => {
-                let tmp_local = self.output.allocate_slot(&crate::ast::Type::new_ptr(false, slot.data_ty.clone()));
+                let tmp_local = self.output.allocate_slot(&crate::ast::Type::new_ptr(crate::Span::new_null(), false, slot.data_ty.clone()));
                 self.output.push_stmt(Operation::BorrowGlobal(tmp_local, true, absolute_path, wrapper_list));
                 self.output.push_stmt(Operation::AssignDeref(tmp_local, v_value));
                 Value::ImplicitUnit
                 },
             Value::Deref { ptr, wrappers } => {
                 let dst_local = if wrappers.is_empty() {
-                        let tmp_local = self.output.allocate_slot(&crate::ast::Type::new_ptr(false, slot.data_ty.clone()));
+                        let tmp_local = self.output.allocate_slot(&crate::ast::Type::new_ptr(crate::Span::new_null(), false, slot.data_ty.clone()));
                         self.output.push_stmt(Operation::PointerOffset(tmp_local, true, ptr, wrappers));
                         tmp_local
                     }

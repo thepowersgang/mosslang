@@ -9,24 +9,24 @@ pub fn parse_type(lex: &mut Lexer) -> Result<crate::ast::Type> {
         if p.is_trivial() {
             use crate::ast::ty::IntClass;
             match p.components[0].to_string().as_str() {
-            "_" => return Ok(Type::new_infer()),
-            "u8"  => return Ok(Type::new_integer(IntClass::Unsigned(0))),
-            "u16" => return Ok(Type::new_integer(IntClass::Unsigned(1))),
-            "u32" => return Ok(Type::new_integer(IntClass::Unsigned(2))),
-            "u64" => return Ok(Type::new_integer(IntClass::Unsigned(3))),
-            "i8"  => return Ok(Type::new_integer(IntClass::Signed(0))),
-            "i16" => return Ok(Type::new_integer(IntClass::Signed(1))),
-            "i32" => return Ok(Type::new_integer(IntClass::Signed(2))),
-            "i64" => return Ok(Type::new_integer(IntClass::Signed(3))),
+            "_" => return Ok(Type::new_infer(lex.end_span(&ps))),
+            "u8"  => return Ok(Type::new_integer(lex.end_span(&ps), IntClass::Unsigned(0))),
+            "u16" => return Ok(Type::new_integer(lex.end_span(&ps), IntClass::Unsigned(1))),
+            "u32" => return Ok(Type::new_integer(lex.end_span(&ps), IntClass::Unsigned(2))),
+            "u64" => return Ok(Type::new_integer(lex.end_span(&ps), IntClass::Unsigned(3))),
+            "i8"  => return Ok(Type::new_integer(lex.end_span(&ps), IntClass::Signed(0))),
+            "i16" => return Ok(Type::new_integer(lex.end_span(&ps), IntClass::Signed(1))),
+            "i32" => return Ok(Type::new_integer(lex.end_span(&ps), IntClass::Signed(2))),
+            "i64" => return Ok(Type::new_integer(lex.end_span(&ps), IntClass::Signed(3))),
 
-            "usize" => return Ok(Type::new_integer(IntClass::PtrInt)),
-            "isize" => return Ok(Type::new_integer(IntClass::PtrDiff)),
-            "void" => return Ok(Type::new_void()),
-            "bool" => return Ok(Type::new_bool()),
+            "usize" => return Ok(Type::new_integer(lex.end_span(&ps), IntClass::PtrInt)),
+            "isize" => return Ok(Type::new_integer(lex.end_span(&ps),IntClass::PtrDiff)),
+            "void" => return Ok(Type::new_void(lex.end_span(&ps))),
+            "bool" => return Ok(Type::new_bool(lex.end_span(&ps))),
             _ => {},
             }
         }
-        Ok( Type::new_path(p) )
+        Ok( Type::new_path(lex.end_span(&ps), p) )
     }
     else {
         match lex.consume_no_eof()?
@@ -34,7 +34,7 @@ pub fn parse_type(lex: &mut Lexer) -> Result<crate::ast::Type> {
         // `(` - Tuple or grouping
         lex::Token::Punct(lex::Punct::ParenOpen) => {
             if lex.opt_consume_punct(lex::Punct::ParenClose)? {
-                Ok( Type::new_unit() )
+                Ok( Type::new_unit(lex.end_span(&ps)) )
             }
             else {
                 let inner = parse_type(lex)?;
@@ -50,7 +50,7 @@ pub fn parse_type(lex: &mut Lexer) -> Result<crate::ast::Type> {
                         v.push(parse_type(lex)?);
                     }
                     lex.consume_punct(lex::Punct::ParenClose)?;
-                    Ok( Type::new_tuple(v) )
+                    Ok( Type::new_tuple(lex.end_span(&ps), v) )
                 }
             }
             },
@@ -63,8 +63,8 @@ pub fn parse_type(lex: &mut Lexer) -> Result<crate::ast::Type> {
                 lex.consume_punct(lex::Punct::SquareClose)?;
                 Ok(match count.e.kind
                     {
-                    crate::ast::expr::ExprKind::LiteralInteger(v, _) if v < usize::MAX as u128 => Type::new_array_fixed(inner, v as usize),
-                    _ => Type::new_array(inner, count),
+                    crate::ast::expr::ExprKind::LiteralInteger(v, _) if v < usize::MAX as u128 => Type::new_array_fixed(lex.end_span(&ps), inner, v as usize),
+                    _ => Type::new_array_expr(lex.end_span(&ps), inner, count),
                     })
             //}
             //else {
@@ -84,11 +84,11 @@ pub fn parse_type(lex: &mut Lexer) -> Result<crate::ast::Type> {
                     return Err(lex.unexpected());
                 };
             let inner = parse_type(lex)?;
-            Ok( Type::new_ptr(is_const, inner) )
+            Ok( Type::new_ptr(lex.end_span(&ps), is_const, inner) )
             },
         lex::Token::RWord(lex::ReservedWord::Typeof) => {
             let e = super::parse_root_expr(lex)?;
-            Ok( Type::new_typeof(e) )
+            Ok( Type::new_typeof(lex.end_span(&ps), e) )
             },
         t => todo!("{}: parse_type - {:?}", ps, t),
         }

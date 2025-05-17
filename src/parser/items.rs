@@ -339,7 +339,7 @@ fn parse_fn_hdr(lex: &mut Lexer, abi: crate::ast::AbiSpec) -> Result<(crate::Ide
             parse_type(lex)?
         }
         else {
-            crate::ast::Type::new_unit()
+            crate::ast::Type::new_unit( lex.end_span(&lex.start_span()) )
         };
     Ok((name, crate::ast::items::FunctionSignature { abi, args, is_variadic, ret: ret_ty }))
 }

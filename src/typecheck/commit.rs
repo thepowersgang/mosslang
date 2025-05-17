@@ -8,9 +8,9 @@ pub fn commit_to_expr(ivars: &mut [super::ivars::IVarEnt], expr: &mut crate::ast
             println!("{INDENT}commit_to_expr: _#{} = {:?}", idx, iv.cls);
             match iv.cls {
             super::ivars::InferType::None => {},    // Will error later?
-            super::ivars::InferType::Integer => iv.ty = Type::new_integer(crate::ast::ty::IntClass::Signed(2)),
+            super::ivars::InferType::Integer => iv.ty = Type::new_integer(crate::Span::new_null(), crate::ast::ty::IntClass::Signed(2)),
             super::ivars::InferType::Float => todo!(), //iv.ty = Type::new_float(),
-            super::ivars::InferType::Pointer => iv.ty = Type::new_ptr(false, Type::new_void()),
+            super::ivars::InferType::Pointer => iv.ty = Type::new_ptr(crate::Span::new_null(), false, Type::new_void(crate::Span::new_null())),
             }
         }
         else {

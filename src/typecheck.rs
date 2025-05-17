@@ -63,10 +63,13 @@ fn enumerate_mod(lc: &mut LookupContext, module: &crate::ast::items::Module, pat
         },
         ItemType::Enum(enm) => {
             let enm_path = path.append(v.name.as_ref().unwrap().clone());
-            let enm_ty = Type { kind: TypeKind::Named(
-                crate::ast::Path { root: crate::ast::path::Root::Root, components: enm_path.0.clone() },
-                Some(crate::ast::path::TypeBinding::DataEnum(enm_path.clone()))
-                ) };
+            let enm_ty = Type {
+                kind: TypeKind::Named(
+                    crate::ast::Path { root: crate::ast::path::Root::Root, components: enm_path.0.clone() },
+                    Some(crate::ast::path::TypeBinding::DataEnum(enm_path.clone()))
+                    ),
+                span: crate::Span::new_null()
+                };
             for variant in &enm.variants {
                 if let crate::ast::items::EnumVariantTy::Data(ty) = &variant.ty {
                     lc.functions.insert(
@@ -119,7 +122,7 @@ fn typecheck_mod(lc: &LookupContext, module: &mut crate::ast::items::Module)
         ItemType::Struct(_str) => {
         },
         ItemType::Enum(enm) => {
-            let ty = crate::ast::Type::new_integer(crate::ast::ty::IntClass::Signed(2));
+            let ty = crate::ast::Type::new_integer(crate::Span::new_null(), crate::ast::ty::IntClass::Signed(2));
             for v in &mut enm.variants {
                 match &mut v.ty {
                 crate::ast::items::EnumVariantTy::Bare => {},

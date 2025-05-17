@@ -45,7 +45,7 @@ impl<'a> crate::ast::ExprVisitor for IvarEnumerate<'a> {
         match expr.kind {
         crate::ast::expr::ExprKind::LiteralInteger(_, ref ty) => match ty {
             crate::ast::expr::IntLitClass::Unspecified => {
-                expr.data_ty = Type { kind: TypeKind::Infer { kind: crate::ast::ty::InferKind::Integer, index: None }};
+                expr.data_ty = Type { kind: TypeKind::Infer { kind: crate::ast::ty::InferKind::Integer, index: None }, span: expr.span.clone() };
             },
             crate::ast::expr::IntLitClass::Pointer
             |crate::ast::expr::IntLitClass::Integer(_) => {
@@ -67,7 +67,7 @@ impl<'a> crate::ast::ExprVisitor for IvarEnumerate<'a> {
         crate::ast::PatternTy::MaybeBind(_) => {}
         crate::ast::PatternTy::NamedValue(..) => {}
         crate::ast::PatternTy::Tuple(patterns) => {
-            pat.data_ty = Type::new_tuple(vec![Type::new_infer(); patterns.len()]);
+            pat.data_ty = Type::new_tuple( pat.span.clone(), patterns.iter().map(|p| Type::new_infer(p.span.clone())).collect() );
             self.fill_ivars_in(&mut pat.data_ty);
             for pat in patterns {
                 self.visit_mut_pattern(pat, refutable);
@@ -125,7 +125,7 @@ impl RuleEnumerate<'_, '_> {
                 ValueBinding::ValueEnumVariant(absolute_path, _) => {
                     // TODO: If this is a data variant, then it should be a function pointer
                     let ap = AbsolutePath(absolute_path.0[..absolute_path.0.len()-1].to_owned());
-                    let mut enum_ty = Type::new_path(crate::ast::Path { root: crate::ast::path::Root::Root, components: ap.0.clone() });
+                    let mut enum_ty = Type::new_path(pattern.span.clone(), crate::ast::Path { root: crate::ast::path::Root::Root, components: ap.0.clone() });
                     let TypeKind::Named(_, ref mut binding) = enum_ty.kind else { panic!(); };
                     *binding = Some(crate::ast::path::TypeBinding::ValueEnum(ap));
 
@@ -151,7 +151,7 @@ impl RuleEnumerate<'_, '_> {
             self.equate_block(span, dst_ty, block);
         }
         else {
-            self.equate_types(span, dst_ty, &Type::new_unit());
+            self.equate_types(span, dst_ty, &Type::new_unit(span.clone()));
         }
     }
     fn equate_block(&mut self, span: &crate::Span, dst_ty: &Type, block: &mut crate::ast::expr::Block) {
@@ -169,7 +169,7 @@ impl RuleEnumerate<'_, '_> {
                 ..
             })) => {}
             _ => {
-                self.equate_types(span, dst_ty, &Type::new_unit());
+                self.equate_types(span, dst_ty, &Type::new_unit(span.clone()));
             }
             }
         }
@@ -182,7 +182,7 @@ impl RuleEnumerate<'_, '_> {
         let src_ty = src_node.data_ty.clone();
         let null_expr = crate::ast::expr::Expr {
             kind: crate::ast::expr::ExprKind::Continue,
-            data_ty: Type::new_infer(),
+            data_ty: Type::new_infer(span.clone()),
             span: src_node.span.clone(),
             };
         *src_node = crate::ast::expr::Expr {
@@ -237,27 +237,27 @@ impl<'a, 'b> crate::ast::ExprVisitor for RuleEnumerate<'a, 'b> {
                 self.equate_types(&expr.span, &expr.data_ty, &e.data_ty);
             }
             else {
-                self.equate_types(&expr.span, &expr.data_ty, &Type::new_unit());
+                self.equate_types(&expr.span, &expr.data_ty, &Type::new_unit(expr.span.clone()));
             }
         },
         ExprKind::LiteralString(_) => {
-            self.equate_types(&expr.span, &expr.data_ty, &Type::new_ptr(true, Type::new_integer(crate::ast::ty::IntClass::Signed(0))));
+            self.equate_types(&expr.span, &expr.data_ty, &Type::new_ptr(expr.span.clone(), true, Type::new_integer(expr.span.clone(), crate::ast::ty::IntClass::Signed(0))));
         },
         ExprKind::LiteralInteger(_, int_lit_class) => {
             use crate::ast::expr::IntLitClass;
             match int_lit_class {
             IntLitClass::Unspecified => set_ivar_kind(&expr.span, self.ivars, &expr.data_ty, super::ivars::InferType::Integer),
             IntLitClass::Pointer     => set_ivar_kind(&expr.span, self.ivars, &expr.data_ty, super::ivars::InferType::Pointer),
-            IntLitClass::Integer(int_class) => self.equate_types(&expr.span, &expr.data_ty, &Type::new_integer(*int_class)),
+            IntLitClass::Integer(int_class) => self.equate_types(&expr.span, &expr.data_ty, &Type::new_integer(expr.span.clone(), *int_class)),
             }
         }
-        ExprKind::TypeInfoSizeOf(_) => self.equate_types(&expr.span, &expr.data_ty, &Type::new_integer(crate::ast::ty::IntClass::PtrInt)),
+        ExprKind::TypeInfoSizeOf(_) => self.equate_types(&expr.span, &expr.data_ty, &Type::new_integer(expr.span.clone(), crate::ast::ty::IntClass::PtrInt)),
         ExprKind::Return(value) => {
             if let Some(expr) = value {
                 self.equate_types(&expr.span, self.ret_ty, &expr.data_ty);
             }
             else {
-                self.equate_types(&expr.span, self.ret_ty, &Type::new_unit());
+                self.equate_types(&expr.span, self.ret_ty, &Type::new_unit(expr.span.clone()));
             }
             // Don't set type - this is a diverge
         },
@@ -270,13 +270,13 @@ impl<'a, 'b> crate::ast::ExprVisitor for RuleEnumerate<'a, 'b> {
                 self.equate_types(&value.span, &ty, &value.data_ty);
             }
             else {
-                self.equate_types(&expr.span, &ty, &Type::new_unit());
+                self.equate_types(&expr.span, &ty, &Type::new_unit(expr.span.clone()));
             }
             // Don't set type - this is a diverge
         },
         ExprKind::Assign { slot, op, value } => {
             self.equate_types(&expr.span, &slot.data_ty, &value.data_ty);
-            self.equate_types(&expr.span, &expr.data_ty, &Type::new_unit());
+            self.equate_types(&expr.span, &expr.data_ty, &Type::new_unit(expr.span.clone()));
             if let Some(op) = op {
             }
         },
@@ -305,7 +305,7 @@ impl<'a, 'b> crate::ast::ExprVisitor for RuleEnumerate<'a, 'b> {
                 },
                 ValueBinding::ValueEnumVariant(absolute_path, _) => {
                     let ap = absolute_path.parent();
-                    let mut enum_ty = Type::new_path(crate::ast::Path { root: crate::ast::path::Root::Root, components: ap.0.clone() });
+                    let mut enum_ty = Type::new_path(expr.span.clone(), crate::ast::Path { root: crate::ast::path::Root::Root, components: ap.0.clone() });
                     let TypeKind::Named(_, ref mut binding) = enum_ty.kind else { panic!(); };
                     *binding = Some(crate::ast::path::TypeBinding::ValueEnum(ap));
 
@@ -346,11 +346,11 @@ impl<'a, 'b> crate::ast::ExprVisitor for RuleEnumerate<'a, 'b> {
             }
         },
         ExprKind::Tuple(exprs) => {
-            let ty = Type::new_tuple( exprs.iter().map(|e| e.data_ty.clone()).collect() );
+            let ty = Type::new_tuple( expr.span.clone(), exprs.iter().map(|e| e.data_ty.clone()).collect() );
             self.equate_types(&expr.span, &expr.data_ty, &ty);
         },
         ExprKind::Struct(name, binding, values) => {
-            todo!("Enumerate rules for struct literal")
+            todo!("Enumerate rules for struct literal - {:?}", binding)
         }
         ExprKind::FieldNamed(expr_v, ident) => {
             self.push_revisit(&expr.span, &expr.data_ty, Revisit::FieldNamed(expr_v.data_ty.clone(), ident.clone()));
@@ -359,13 +359,13 @@ impl<'a, 'b> crate::ast::ExprVisitor for RuleEnumerate<'a, 'b> {
             self.push_revisit(&expr.span, &expr.data_ty, Revisit::FieldIndex(expr_v.data_ty.clone(), *idx));
         },
         ExprKind::Index(expr_v, expr_i) => {
-            self.make_coerce(&expr.span, Type::new_integer(crate::ast::ty::IntClass::PtrInt), expr_i);
+            self.make_coerce(&expr.span, Type::new_integer(expr.span.clone(), crate::ast::ty::IntClass::PtrInt), expr_i);
             // Defer - this is a revisit
             // - Although the index should be an integer?
             self.push_revisit(&expr.span, &expr.data_ty, Revisit::Index(expr_v.data_ty.clone(), expr_i.data_ty.clone()));
         },
         ExprKind::Addr(is_mut, expr_v) => {
-            let ty = Type::new_ptr( !*is_mut, expr_v.data_ty.clone() );
+            let ty = Type::new_ptr( expr.span.clone(), !*is_mut, expr_v.data_ty.clone() );
             self.equate_types(&expr.span, &expr.data_ty, &ty);
         },
         ExprKind::Deref(val_expr) => {
@@ -388,13 +388,13 @@ impl<'a, 'b> crate::ast::ExprVisitor for RuleEnumerate<'a, 'b> {
             |BinOpTy::Lt | BinOpTy::LtEquals
             |BinOpTy::Gt | BinOpTy::GtEquals => {
                 self.make_coerce(&expr.span, expr_l.data_ty.clone(), expr_r);
-                self.equate_types(&expr.span, &expr.data_ty, &Type::new_bool());
+                self.equate_types(&expr.span, &expr.data_ty, &Type::new_bool(expr.span.clone()));
             },
             // Boolean operators coerce both inputs too bool and return bool
             BinOpTy::BoolAnd | BinOpTy::BoolOr => {
-                self.make_coerce(&expr.span, Type::new_bool(), expr_l);
-                self.make_coerce(&expr.span, Type::new_bool(), expr_r);
-                self.equate_types(&expr.span, &expr.data_ty, &Type::new_bool());
+                self.make_coerce(&expr.span, Type::new_bool(expr.span.clone()), expr_l);
+                self.make_coerce(&expr.span, Type::new_bool(expr.span.clone()), expr_r);
+                self.equate_types(&expr.span, &expr.data_ty, &Type::new_bool(expr.span.clone()));
             },
             // Add and subtract need special logic for pointer arithmatic
             BinOpTy::Add => self.push_revisit(&expr.span, &expr.data_ty, Revisit::Add(expr_l.data_ty.clone(), expr_r.data_ty.clone())),
@@ -409,13 +409,13 @@ impl<'a, 'b> crate::ast::ExprVisitor for RuleEnumerate<'a, 'b> {
         ExprKind::CallValue(expr, exprs) => todo!("CallValue"),
         ExprKind::Loop { body } => {
             if let Some(res) = &body.result {
-                self.equate_types(&expr.span, &Type::new_unit(), &res.data_ty);
+                self.equate_types(&expr.span, &Type::new_unit(expr.span.clone()), &res.data_ty);
             }
         },
         ExprKind::WhileLoop { cond, body, else_block } => {
-            self.equate_types(&cond.span, &Type::new_bool(), &cond.data_ty);
+            self.equate_types(&cond.span, &Type::new_bool(cond.span.clone()), &cond.data_ty);
             if let Some(res) = &body.result {
-                self.equate_types(&res.span, &Type::new_unit(), &res.data_ty);
+                self.equate_types(&res.span, &Type::new_unit(res.span.clone()), &res.data_ty);
             }
             self.equate_opt_block(&expr.span, &expr.data_ty, else_block);
         },
@@ -424,13 +424,13 @@ impl<'a, 'b> crate::ast::ExprVisitor for RuleEnumerate<'a, 'b> {
             self.equate_types(&start.span, &start.data_ty, &end.data_ty);
 
             if let Some(res) = &body.result {
-                self.equate_types(&res.span, &Type::new_unit(), &res.data_ty);
+                self.equate_types(&res.span, &Type::new_unit(res.span.clone()), &res.data_ty);
             }
             self.equate_opt_block(&expr.span, &expr.data_ty, else_block);
         },
         ExprKind::IfChain { branches, else_block } => {
             for b in branches {
-                self.equate_types(&b.cond.span, &Type::new_bool(), &b.cond.data_ty);
+                self.equate_types(&b.cond.span, &Type::new_bool(b.cond.span.clone()), &b.cond.data_ty);
                 self.equate_block(&expr.span, &expr.data_ty, &mut b.body);
             }
             self.equate_opt_block(&expr.span, &expr.data_ty, else_block);
@@ -450,7 +450,7 @@ impl<'a, 'b> crate::ast::ExprVisitor for RuleEnumerate<'a, 'b> {
             crate::ast::expr::Statement::Expr(e) => {
                 self.visit_mut_expr(e);
                 // Coerce to void, discarding the value?
-                self.make_coerce(&e.span.clone(), Type::new_void(), e);
+                self.make_coerce(&e.span.clone(), Type::new_void(e.span.clone()), e);
                 // Or coerce to unit
                 //self.make_coerce(&e.span.clone(), Type::new_unit(), e);
             },

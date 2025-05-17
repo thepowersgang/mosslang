@@ -34,7 +34,7 @@ pub struct Expr {
 }
 impl ExprKind {
     pub fn to_expr(self, span: crate::Span) -> Expr {
-        Expr { span, kind: self, data_ty: crate::ast::Type::new_infer() }
+        Expr { kind: self, data_ty: crate::ast::Type::new_infer(span.clone()), span }
     }
 }
 pub enum ExprKind

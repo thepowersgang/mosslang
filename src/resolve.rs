@@ -181,7 +181,7 @@ struct ItemScope<'a> {
     values: HashMap<crate::Ident, crate::ast::path::ValueBinding>,
 }
 
-fn resolve_path_type(item_scope: &ItemScope, p: &crate::ast::Path) -> crate::ast::path::TypeBinding {
+fn resolve_path_type(item_scope: &ItemScope, span: &crate::Span, p: &crate::ast::Path) -> crate::ast::path::TypeBinding {
     assert!(matches!(p.root, crate::ast::path::Root::None));
     let c = p.components.first().expect("Empty path?");
     if p.components.len() == 2 {
@@ -198,7 +198,7 @@ fn resolve_path_type(item_scope: &ItemScope, p: &crate::ast::Path) -> crate::ast
             return v.clone();
         }
     }
-    todo!("Resolve type path {:?}", p);
+    todo!("{} Resolve type path {:?}", span, p);
 }
 
 fn resolve_type(item_scope: &ItemScope, ty: &mut crate::ast::Type)
@@ -216,7 +216,7 @@ fn resolve_type(item_scope: &ItemScope, ty: &mut crate::ast::Type)
     },
     TypeKind::Named(path, ref mut binding) => {
         if binding.is_none() {
-            let r = resolve_path_type(item_scope, path);
+            let r = resolve_path_type(item_scope, &ty.span, path);
             if let TypeBinding::Alias(t) = r {
                 let a = item_scope.lc.type_alises.get(&t).expect("Missing TypeAlias");
                 *ty = a.clone();
@@ -358,6 +358,10 @@ fn resolve_expr(item_scope: &ItemScope, expr: &mut crate::ast::ExprRoot, args: &
             ExprKind::NamedValue(p, binding) => {
                 *binding = Some(self.resolve_path_value(&expr.span, p));
                 println!("{INDENT}NamedValue: {:?} = {:?} @ {:p}", p, binding.as_ref().unwrap(), expr_p);
+                },
+            ExprKind::Struct(p, binding, _) => {
+                *binding = Some(resolve_path_type(self.item_scope, &expr.span, p));
+                println!("{INDENT}Struct: {:?} = {:?} @ {:p}", p, binding.as_ref().unwrap(), expr_p);
                 },
             ExprKind::Cast(_, ty) => resolve_type(self.item_scope, ty),
             _ => {},

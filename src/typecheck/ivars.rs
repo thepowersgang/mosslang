@@ -14,7 +14,7 @@ impl InferType {
         InferType::None => unreachable!(),
         InferType::Float => todo!(),
         InferType::Integer => TypeKind::Integer(crate::ast::ty::IntClass::Signed(2)),
-        InferType::Pointer => TypeKind::Pointer {is_const: true, inner: Box::new(Type::new_infer()) },
+        InferType::Pointer => TypeKind::Pointer {is_const: true, inner: Box::new(Type::new_infer(crate::Span::new_null())) },
         }
     }
 }
@@ -24,7 +24,7 @@ pub struct IVarEnt {
 }
 impl IVarEnt {
     pub fn new() -> Self {
-        IVarEnt { ty: Type::new_infer(), cls: InferType::None }
+        IVarEnt { ty: Type::new_infer(crate::Span::new_null()), cls: InferType::None }
     }
 }
 

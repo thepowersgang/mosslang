@@ -21,7 +21,7 @@ pub(super) fn typecheck_expr(lc: &super::LookupContext, ret_ty: &crate::ast::Typ
         for (_, t) in args {
             expr.variables.push(t.clone());
         }
-        expr.variables.resize_with(expr.variable_count, || Type::new_infer());
+        expr.variables.resize_with(expr.variable_count, || Type::new_infer(crate::Span::new_null()));
         for t in &mut expr.variables {
             es.fill_ivars_in(t);
         }
@@ -71,7 +71,7 @@ pub(super) fn typecheck_expr(lc: &super::LookupContext, ret_ty: &crate::ast::Typ
                     v.clear();
                     continue;
                 };
-                let dst_ty = Type { kind: TypeKind::Infer { kind: InferKind::None, index: Some(*idx) } };
+                let dst_ty = Type { kind: TypeKind::Infer { kind: InferKind::None, index: Some(*idx) }, span: crate::Span::new_null() };
                 println!("{INDENT} #{}: {:?}", idx, v);
                 
                 fn find_single(v: &std::collections::BTreeSet<(Type,bool)>, req_is_to: bool) -> Option<&Type> {
@@ -268,7 +268,7 @@ fn check_revisit(ir: &mut IvarRules, lc: &super::LookupContext, ivars: &mut [sup
         (TypeKind::Pointer { .. }, TypeKind::Infer { kind: InferKind::None, .. }) => R::Keep,
         (TypeKind::Pointer { .. }, TypeKind::Infer { kind: InferKind::Integer, .. })
         |(TypeKind::Pointer { .. }, TypeKind::Integer(..)) => {
-            equate_types(span, ivars, ty_r, &Type::new_integer(crate::ast::ty::IntClass::PtrInt));
+            equate_types(span, ivars, ty_r, &Type::new_integer(span.clone(), crate::ast::ty::IntClass::PtrInt));
             equate_types(span, ivars, dst_ty, ty_l);
             R::Consume
         },
@@ -290,12 +290,12 @@ fn check_revisit(ir: &mut IvarRules, lc: &super::LookupContext, ivars: &mut [sup
         (TypeKind::Pointer { .. }, TypeKind::Infer { kind: InferKind::None, .. }) => R::Keep,
         (TypeKind::Pointer { .. }, TypeKind::Pointer { .. }) => {
             equate_types(span, ivars, ty_l, ty_r);
-            equate_types(span, ivars, dst_ty, &Type::new_integer(crate::ast::ty::IntClass::PtrDiff));
+            equate_types(span, ivars, dst_ty, &Type::new_integer(span.clone(), crate::ast::ty::IntClass::PtrDiff));
             R::Consume
         },
         (TypeKind::Pointer { .. }, TypeKind::Infer { kind: InferKind::Integer, .. })
         | (TypeKind::Pointer { .. }, TypeKind::Integer(..)) => {
-            equate_types(span, ivars, ty_r, &Type::new_integer(crate::ast::ty::IntClass::PtrInt));
+            equate_types(span, ivars, ty_r, &Type::new_integer(span.clone(), crate::ast::ty::IntClass::PtrInt));
             equate_types(span, ivars, dst_ty, ty_l);
             R::Consume
         },

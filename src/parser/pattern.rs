@@ -8,6 +8,14 @@ use crate::ast::{Pattern, PatternTy};
 pub fn parse_pattern(lex: &mut Lexer) -> Result<crate::ast::Pattern> {
     parse_pattern_inner(lex, Vec::new())
 }
+fn make_pat(span: crate::Span, bindings: Vec<PatternBinding>, ty: PatternTy) -> Pattern {
+    Pattern {
+        data_ty: crate::ast::Type::new_infer(span.clone()),
+        span,
+        bindings,
+        ty
+        }
+}
 fn parse_pattern_inner(lex: &mut Lexer, mut bindings: Vec<PatternBinding>) -> Result<crate::ast::Pattern> {
     let ps = lex.start_span();
     Ok(if let Some(p) = super::opt_parse_path(lex)? {
@@ -28,11 +36,11 @@ fn parse_pattern_inner(lex: &mut Lexer, mut bindings: Vec<PatternBinding>) -> Re
             todo!("parse_pattern - named struct");
         }
         else {
-            match p.into_trivial()
-            {
-            Ok(i) => Pattern { span: lex.end_span(&ps), bindings, ty: PatternTy::MaybeBind(i), data_ty: crate::ast::Type::new_infer() },
-            Err(p) => Pattern { span: lex.end_span(&ps), bindings, ty: PatternTy::NamedValue(p, None), data_ty: crate::ast::Type::new_infer()  },
-            }
+            make_pat(lex.end_span(&ps), bindings, match p.into_trivial()
+                {
+                Ok(i) => PatternTy::MaybeBind(i),
+                Err(p) => PatternTy::NamedValue(p, None),
+                })
         }
     }
     else if lex.opt_consume_punct(lex::Punct::ParenOpen)? {
@@ -50,12 +58,7 @@ fn parse_pattern_inner(lex: &mut Lexer, mut bindings: Vec<PatternBinding>) -> Re
                 break;
             }
         }
-        Pattern {
-            span: lex.end_span(&ps),
-            bindings,
-            ty: PatternTy::Tuple(pats),
-            data_ty: crate::ast::Type::new_infer(),
-        }
+        make_pat(lex.end_span(&ps), bindings, PatternTy::Tuple(pats))
     }
     else if lex.opt_consume_rword(lex::ReservedWord::Mut)? {
         bindings.push(PatternBinding { name: lex.consume_ident()?, index: None });
@@ -63,7 +66,7 @@ fn parse_pattern_inner(lex: &mut Lexer, mut bindings: Vec<PatternBinding>) -> Re
             return parse_pattern_inner(lex, bindings);
         }
         else {
-            Pattern { span: lex.end_span(&ps), bindings, ty: PatternTy::Any, data_ty: crate::ast::Type::new_infer()  }
+            make_pat(lex.end_span(&ps), bindings, PatternTy::Any)
         }
     }
     // TODO: Integer patterns (with ranges, and `|`)

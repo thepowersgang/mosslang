@@ -40,7 +40,7 @@ fn parse_block(lex: &mut super::Lexer) -> super::Result<e::Block> {
                     super::parse_type(lex)?
                 }
                 else {
-                    crate::ast::Type::new_infer()
+                    crate::ast::Type::new_infer( lex.end_span(&lex.start_span()) )
                 };
             let val = if lex.opt_consume_punct(Punct::Equals)? {
                 Some(parse_expr(lex)?)
@@ -213,7 +213,7 @@ fn parse_expr_cast(lex: &mut super::Lexer) -> super::Result<e::Expr> {
     loop {
         if lex.opt_consume_rword(ReservedWord::As)? {
             let ty = super::parse_type(lex)?;
-            v = e::Expr { span: lex.end_span(&ps), kind: e::ExprKind::Cast(Box::new(v), ty), data_ty: crate::ast::Type::new_infer() };
+            v = e::ExprKind::Cast(Box::new(v), ty).to_expr(lex.end_span(&ps));
         }
         else {
             break;
