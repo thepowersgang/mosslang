@@ -40,6 +40,14 @@ pub fn get_ivar<'a>(ivars: &'a [IVarEnt], mut ty: &'a Type) -> &'a Type
     }
     ty
 }
+pub fn get_infer_kind(ivars: &[super::ivars::IVarEnt], ty: &Type) -> InferType {
+    if let TypeKind::Infer { index, .. } = ty.kind {
+        ivars[index.unwrap()].cls
+    }
+    else {
+        InferType::None
+    }
+}
 
 pub fn set_ivar_kind(span: &crate::Span, ivars: &mut [IVarEnt], ty: &Type, k: InferType) {
     println!("{INDENT}set_ivar_kind {ty} = {k:?}");
@@ -163,6 +171,7 @@ fn equate_types_inner(ivars: &mut [IVarEnt], l: &Type, r: &Type) -> Result<(),(T
                 (InferType::None, InferType::None) => {},
                 (InferType::Integer, InferType::Integer) => {},
                 (InferType::Float, InferType::Float) => {},
+                (InferType::Pointer, InferType::Pointer) => {},
                 (ref mut dst @ InferType::None, i) => *dst = i,
                 (i, ref mut dst @ InferType::None) => *dst = i,
                 _ => return Err(( t1.cls.to_type_kind(), t2.cls.to_type_kind(), )),
@@ -261,11 +270,11 @@ fn equate_type_kind(ivars: &mut [IVarEnt], l: &TypeKind, r: &TypeKind) -> Result
         Ok( () )
     },
     (TypeKind::Named { .. }, _) => Err((l.clone(),r.clone())),
-    (TypeKind::Pointer { is_const, inner }, TypeKind::Pointer { is_const: ic_r, inner: i_r }) => {
-        if *is_const != *ic_r {
+    (TypeKind::Pointer { is_const: ic_l, inner: i_l }, TypeKind::Pointer { is_const: ic_r, inner: i_r }) => {
+        if *ic_l != *ic_r {
             return Err((l.clone(),r.clone()));
         }
-        equate_types_inner(ivars, inner, i_r)
+        equate_types_inner(ivars, i_l, i_r)
     },
     (TypeKind::Pointer { .. }, _) => Err((l.clone(),r.clone())),
     (TypeKind::Array { inner: i_l, count: c_l }, TypeKind::Array { inner: i_r, count: c_r }) => {
@@ -284,6 +293,10 @@ fn equate_type_kind(ivars: &mut [IVarEnt], l: &TypeKind, r: &TypeKind) -> Result
         Ok( () )
     },
     (TypeKind::Array { .. }, _) => Err((l.clone(),r.clone())),
+    (TypeKind::UnsizedArray(i_l), TypeKind::UnsizedArray(i_r)) => {
+        equate_types_inner(ivars, i_l, i_r)
+    },
+    (TypeKind::UnsizedArray(..), _) => Err((l.clone(),r.clone())),
     (TypeKind::TypeOf(..), _) => todo!("Handle equality between typeof"),
     }
 }

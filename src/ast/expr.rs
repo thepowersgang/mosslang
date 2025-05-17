@@ -166,7 +166,7 @@ impl<'a> ::core::fmt::Debug for ExprKind {
             write!(f, "UniOp({:?}, ...)", uni_op_ty),
         ExprKind::BinOp(bin_op_ty, _expr_l, _expr_r) =>
             write!(f, "BinOp(... {:?} ...)", bin_op_ty),
-        ExprKind::Loop { body: _ } => todo!(),
+        ExprKind::Loop { body: _ } => write!(f, "Loop(...)"),
         ExprKind::WhileLoop { cond: _, body: _, else_block } => 
             write!(f, "WhileLoop( ... else {})", if else_block.is_none() { "() " } else { "..." }),
         ExprKind::ForLoop { pattern, start: _, end: _, body: _, else_block } =>

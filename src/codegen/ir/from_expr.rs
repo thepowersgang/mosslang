@@ -221,7 +221,7 @@ impl<'a,'b> Visitor<'a,'b> {
             Value::Local(rv, Default::default())
         },
         ExprKind::Struct(_, binding, values) => {
-            todo!();
+            todo!("IR lower struct literal");
         }
         ExprKind::FieldNamed(expr, ident) => {
             let v = self.visit_expr(expr);

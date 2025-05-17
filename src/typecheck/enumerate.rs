@@ -35,6 +35,9 @@ impl<'a> IvarEnumerate<'a> {
         TypeKind::Array { inner, count: _ } => {
             self.fill_ivars_in(inner);
         },
+        TypeKind::UnsizedArray(inner) => {
+            self.fill_ivars_in(inner);
+        },
         TypeKind::TypeOf(inner) => todo!("Recurse into expression for `TypeOf`?"),
         }
     }
@@ -275,10 +278,20 @@ impl<'a, 'b> crate::ast::ExprVisitor for RuleEnumerate<'a, 'b> {
             // Don't set type - this is a diverge
         },
         ExprKind::Assign { slot, op, value } => {
-            self.equate_types(&expr.span, &slot.data_ty, &value.data_ty);
-            self.equate_types(&expr.span, &expr.data_ty, &Type::new_unit(expr.span.clone()));
             if let Some(op) = op {
+                // Use the same rules as BinOp
+                // - Add/Sub are special, the rest coerce
+                use crate::ast::expr::AssignOp;
+                match *op {
+                AssignOp::Add => self.push_revisit(&expr.span, &slot.data_ty, Revisit::Add(slot.data_ty.clone(), value.data_ty.clone())),
+                AssignOp::Sub => self.push_revisit(&expr.span, &slot.data_ty, Revisit::Sub(slot.data_ty.clone(), value.data_ty.clone())),
+                _ => self.make_coerce(&expr.span, slot.data_ty.clone(), value),
+                }
             }
+            else {
+                self.make_coerce(&expr.span, slot.data_ty.clone(), value);
+            }
+            self.equate_types(&expr.span, &expr.data_ty, &Type::new_unit(expr.span.clone()));
         },
         ExprKind::NamedValue(path, value_binding) => {
             let Some(value_binding) = value_binding else { panic!("Unresolved path: {:?}", path) };

@@ -238,6 +238,9 @@ fn resolve_type(item_scope: &ItemScope, ty: &mut crate::ast::Type)
         crate::ast::ty::ArraySize::Known(_) => {},
         }
     },
+    TypeKind::UnsizedArray(inner) => {
+        resolve_type(item_scope, inner);
+    },
     TypeKind::TypeOf(expr) => {
         resolve_expr(item_scope, &mut expr.0, &mut []);
     }

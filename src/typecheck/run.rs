@@ -4,7 +4,8 @@
 use crate::INDENT;
 use crate::ast::ty::{Type,TypeKind,InferKind};
 use super::{enumerate,Rules,Revisit};
-use super::ivars::{equate_types,get_ivar};
+use super::ivars::InferType;
+use super::ivars::{equate_types,get_ivar,get_infer_kind};
 
 /// Run type-checking on an expression
 pub(super) fn typecheck_expr(lc: &super::LookupContext, ret_ty: &crate::ast::Type, expr: &mut crate::ast::ExprRoot, args: &mut [(crate::ast::Pattern, crate::ast::Type)])
@@ -48,7 +49,7 @@ pub(super) fn typecheck_expr(lc: &super::LookupContext, ret_ty: &crate::ast::Typ
     // Run solver
     for pass_num in 0 .. {
         for (i,ty) in ivars.iter().enumerate() {
-            println!("{INDENT} _#{} = {}", i, ty.ty);
+            println!("{INDENT} _#{} = {:?} {}", i, ty.cls, ty.ty);
         }
         if rules.revisits.is_empty() {
             break;
@@ -63,6 +64,10 @@ pub(super) fn typecheck_expr(lc: &super::LookupContext, ret_ty: &crate::ast::Typ
         let mut changed = rules.revisits.len() < n;
         if !changed {
             for (idx, v) in &mut ir.ivars {
+                if changed {
+                    // HACK: Avoid issues when one ivar changes the possibility set for another
+                    break;
+                }
                 if v.len() == 0 {
                     continue;
                 }
@@ -72,8 +77,10 @@ pub(super) fn typecheck_expr(lc: &super::LookupContext, ret_ty: &crate::ast::Typ
                     continue;
                 };
                 let dst_ty = Type { kind: TypeKind::Infer { kind: InferKind::None, index: Some(*idx) }, span: crate::Span::new_null() };
+                // Resolve ivars
+                *v = ::std::mem::take(v).into_iter().map(|(ty,is_to)| (get_ivar(&ivars, &ty).clone(), is_to) ).collect();
                 println!("{INDENT} #{}: {:?}", idx, v);
-                
+
                 fn find_single(v: &std::collections::BTreeSet<(Type,bool)>, req_is_to: bool) -> Option<&Type> {
                     let mut rv = None;
                     for (ty,is_to) in v.iter() {
@@ -98,9 +105,11 @@ pub(super) fn typecheck_expr(lc: &super::LookupContext, ret_ty: &crate::ast::Typ
                     changed = true;
                     continue ;
                 }
+                // TODO: Advanced rules
+                // > Example: `#1 = { to void, to c_char }` should pick `c_char` as that can convert to `void` but the reverse is not true
             }
         }
-        assert!(changed);
+        assert!(changed, "Loop with no changes");
     }
     
     // Check that everything is complete
@@ -133,10 +142,11 @@ fn check_revisit(ir: &mut IvarRules, lc: &super::LookupContext, ivars: &mut [sup
     Revisit::Coerce(src_ty) => {
         let t_l = get_ivar(&ivars, dst_ty);
         let t_r = get_ivar(&ivars, src_ty);
-        println!("Revisit::Coerce: {} := {}", t_l, t_r);
+        println!("{INDENT}Revisit::Coerce: {} := {}", t_l, t_r);
         match (&t_l.kind, &t_r.kind) {
         _ if ::std::ptr::eq(t_l, t_r) => R::Consume,
         _ if t_l == t_r => R::Consume,
+        // Ivars do magic things
         (TypeKind::Infer { index: i_l, kind: InferKind::None }, TypeKind::Infer { index: i_r, kind: InferKind::None }) => {
             ir.coerce_from(i_l.unwrap(), t_r.clone());
             ir.coerce_to(i_r.unwrap(), t_l.clone());
@@ -150,6 +160,7 @@ fn check_revisit(ir: &mut IvarRules, lc: &super::LookupContext, ivars: &mut [sup
             ir.coerce_to(i_r.unwrap(), t_l.clone());
             R::Keep
             },
+        // Integers just convert between each other
         (TypeKind::Integer(ic_l), TypeKind::Integer(ic_r)) => {
             if ic_l != ic_r {
                 // TODO: Check if this coerce is valid
@@ -159,6 +170,7 @@ fn check_revisit(ir: &mut IvarRules, lc: &super::LookupContext, ivars: &mut [sup
             }
             R::Consume
             },
+        // Pointers: Allow decaying
         (TypeKind::Pointer { is_const: c_l, inner: i_l }, TypeKind::Pointer { is_const: c_r, inner: i_r }) => {
             // If the source is a constant pointer, the destination must be a constant
             if *c_r && !*c_l {
@@ -194,6 +206,14 @@ fn check_revisit(ir: &mut IvarRules, lc: &super::LookupContext, ivars: &mut [sup
             }
             }
             },
+        (TypeKind::Pointer { is_const: _, inner: i_l }, TypeKind::UnsizedArray(i_r) | TypeKind::Array { inner: i_r, ..}) => {
+            //let inner_dst = get_ivar(&ivars, i_l);
+            //let inner_src = get_ivar(&ivars, i_r);
+            let i_l = (**i_l).clone();
+            let i_r = (**i_r).clone();
+            equate_types(span, ivars, &i_l, &i_r);
+            R::Consume
+        },
         (TypeKind::Void, _) => {
             R::Consume
             },
@@ -263,17 +283,19 @@ fn check_revisit(ir: &mut IvarRules, lc: &super::LookupContext, ivars: &mut [sup
         println!("Revisit::Add: {} + {}", get_ivar(&ivars, ty_l), get_ivar(&ivars, ty_r));
         let ty_li = get_ivar(&ivars, ty_l);
         let ty_ri = get_ivar(&ivars, ty_r);
-        match (&ty_li.kind, &ty_ri.kind) {
-        (TypeKind::Infer { kind: InferKind::None, .. }, _) => R::Keep,
-        (TypeKind::Pointer { .. }, TypeKind::Infer { kind: InferKind::None, .. }) => R::Keep,
-        (TypeKind::Pointer { .. }, TypeKind::Infer { kind: InferKind::Integer, .. })
-        |(TypeKind::Pointer { .. }, TypeKind::Integer(..)) => {
+        let ikind_l = get_infer_kind(&ivars, ty_li);
+        let ikind_r = get_infer_kind(&ivars, ty_ri);
+        match (&ty_li.kind, ikind_l, &ty_ri.kind, ikind_r) {
+        (TypeKind::Infer { .. }, InferType::None, _, _) => R::Keep,
+        (TypeKind::Pointer { .. }, _, TypeKind::Infer { .. }, InferType::None) => R::Keep,
+        (TypeKind::Pointer { .. }, _, TypeKind::Infer { .. }, InferType::Integer)
+        |(TypeKind::Pointer { .. }, _, TypeKind::Integer(..), _) => {
             equate_types(span, ivars, ty_r, &Type::new_integer(span.clone(), crate::ast::ty::IntClass::PtrInt));
             equate_types(span, ivars, dst_ty, ty_l);
             R::Consume
         },
-        (TypeKind::Infer { kind: InferKind::Integer, .. }, _)
-        | (TypeKind::Integer(..), _) => {
+        (TypeKind::Infer { .. }, InferType::Integer, _, _)
+        | (TypeKind::Integer(..), _, _, _) => {
             equate_types(span, ivars, ty_l, ty_r);
             equate_types(span, ivars, dst_ty, ty_l);
             R::Consume
@@ -285,22 +307,24 @@ fn check_revisit(ir: &mut IvarRules, lc: &super::LookupContext, ivars: &mut [sup
         println!("Revisit::Sub: {} - {}", get_ivar(&ivars, ty_l), get_ivar(&ivars, ty_r));
         let ty_li = get_ivar(&ivars, ty_l);
         let ty_ri = get_ivar(&ivars, ty_r);
-        match (&ty_li.kind, &ty_ri.kind) {
-        (TypeKind::Infer { kind: InferKind::None, .. }, _) => R::Keep,
-        (TypeKind::Pointer { .. }, TypeKind::Infer { kind: InferKind::None, .. }) => R::Keep,
-        (TypeKind::Pointer { .. }, TypeKind::Pointer { .. }) => {
+        let ikind_l = get_infer_kind(&ivars, ty_li);
+        let ikind_r = get_infer_kind(&ivars, ty_ri);
+        match (&ty_li.kind, ikind_l, &ty_ri.kind, ikind_r) {
+        (TypeKind::Infer { .. }, InferType::None, _, _) => R::Keep,
+        (TypeKind::Pointer { .. }, _, TypeKind::Infer { .. }, InferType::None) => R::Keep,
+        (TypeKind::Pointer { .. }, _, TypeKind::Pointer { .. }, _) => {
             equate_types(span, ivars, ty_l, ty_r);
             equate_types(span, ivars, dst_ty, &Type::new_integer(span.clone(), crate::ast::ty::IntClass::PtrDiff));
             R::Consume
         },
-        (TypeKind::Pointer { .. }, TypeKind::Infer { kind: InferKind::Integer, .. })
-        | (TypeKind::Pointer { .. }, TypeKind::Integer(..)) => {
+        (TypeKind::Pointer { .. }, _, TypeKind::Infer {  .. }, InferType::Integer)
+        | (TypeKind::Pointer { .. }, _, TypeKind::Integer(..), _) => {
             equate_types(span, ivars, ty_r, &Type::new_integer(span.clone(), crate::ast::ty::IntClass::PtrInt));
             equate_types(span, ivars, dst_ty, ty_l);
             R::Consume
         },
-        (TypeKind::Infer { kind: InferKind::Integer, .. }, _)
-        |(TypeKind::Integer(..), _) => {
+        (TypeKind::Infer { .. }, InferType::Integer, _,_)
+        |(TypeKind::Integer(..),_, _,_) => {
             equate_types(span, ivars, ty_l, ty_r);
             equate_types(span, ivars, dst_ty, ty_l);
             R::Consume

@@ -165,6 +165,12 @@ impl Type
             }
             f.write_str("]")
         },
+        TypeKind::UnsizedArray(inner) => {
+            f.write_str("[")?;
+            inner.fmt(f, is_debug)?;
+            f.write_str("; ...")?;
+            f.write_str("]")
+        },
         TypeKind::TypeOf(inner) => {
             write!(f, "typeof({:?})", inner.0)
         }
@@ -287,6 +293,9 @@ pub enum TypeKind
         inner: Box<Type>,
         count: ArraySize,
     },
+    /// An array with no size specified (similar to rust's slice type, but doesn't imply metadata)
+    UnsizedArray(Box<Type>),
+    /// Evaluates to the type of an expression (during typecheck)
     TypeOf(ExprInType),
 }
 #[derive(Clone,Debug)]

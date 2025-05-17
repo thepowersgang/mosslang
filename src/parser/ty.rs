@@ -57,8 +57,16 @@ pub fn parse_type(lex: &mut Lexer) -> Result<crate::ast::Type> {
         // '[' - Array or slice
         lex::Token::Punct(lex::Punct::SquareOpen) => {
             let inner = parse_type(lex)?;
-            lex.consume_punct(lex::Punct::Semicolon)?;
-            //if lex.opt_consume_punct(lex::Punct::Semicolon)? {
+            if !lex.opt_consume_punct(lex::Punct::Semicolon)? {
+                lex.consume_punct(lex::Punct::SquareClose)?;
+                todo!("{ps}Rust slices");
+                //Ok( Type::new_slice(inner) )
+            }
+            else if lex.opt_consume_punct(lex::Punct::TripleDot)? {
+                lex.consume_punct(lex::Punct::SquareClose)?;
+                Ok(Type { span: lex.end_span(&ps), kind: crate::ast::ty::TypeKind::UnsizedArray(Box::new(inner)) })
+            }
+            else {
                 let count = super::expr::parse_root_expr(lex)?;
                 lex.consume_punct(lex::Punct::SquareClose)?;
                 Ok(match count.e.kind
@@ -66,11 +74,7 @@ pub fn parse_type(lex: &mut Lexer) -> Result<crate::ast::Type> {
                     crate::ast::expr::ExprKind::LiteralInteger(v, _) if v < usize::MAX as u128 => Type::new_array_fixed(lex.end_span(&ps), inner, v as usize),
                     _ => Type::new_array_expr(lex.end_span(&ps), inner, count),
                     })
-            //}
-            //else {
-            //    lex.consume_punct(lex::Punct::SquareClose)?;
-            //    Ok( Type::new_slice(inner) )
-            //}
+            }
             },
         // '*' ['const'|'mut'] - Pointer
         lex::Token::Punct(lex::Punct::Star) => {
