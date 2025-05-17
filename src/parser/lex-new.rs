@@ -81,7 +81,10 @@ impl Span
 }
 impl ::std::fmt::Display for Span {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.line == self.end_line {
+        if &*self.path == ::std::path::Path::new("") {
+            write!(f, "NULL: ")
+        }
+        else if self.line == self.end_line {
             write!(f, "{}:{}:{}-{}: ", self.path.display(), self.line, self.ofs, self.end_ofs)
         }
         else {
