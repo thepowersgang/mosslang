@@ -64,8 +64,8 @@ pub enum ValueBinding
     Function(AbsolutePath),
     Static(AbsolutePath),
     Constant(AbsolutePath),
-    /// Constructor for a tuple-like struct
-    StructValue(AbsolutePath),
+    ///// Constructor for a tuple-like struct
+    //StructValue(AbsolutePath),
     /// Enum value - convertable to integer
     ValueEnumVariant(AbsolutePath, usize),
     /// Enum value - function pointer

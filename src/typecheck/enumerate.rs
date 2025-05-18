@@ -339,7 +339,7 @@ impl<'a, 'b> crate::ast::ExprVisitor for RuleEnumerate<'a, 'b> {
                 ValueBinding::Constant(absolute_path) => {
                     &self.lc.constants.get(&absolute_path).expect("Incorrect function path")
                 },
-                ValueBinding::StructValue(absolute_path) => todo!(),
+                //ValueBinding::StructValue(absolute_path) => todo!(),
                 ValueBinding::DataEnumVariant(absolute_path, _) => {
                     let Some(args) = self.lc.functions.get(&absolute_path) else { panic!("{}: Unable to find function for data variant {}", expr.span, absolute_path) };
                     todo!("Function pointer to enum variant")
@@ -361,7 +361,7 @@ impl<'a, 'b> crate::ast::ExprVisitor for RuleEnumerate<'a, 'b> {
             match value_binding {
             ValueBinding::Local(_) => todo!("call local"),
             ValueBinding::Function(absolute_path)
-            |ValueBinding::StructValue(absolute_path)
+            //|ValueBinding::StructValue(absolute_path)
             |ValueBinding::DataEnumVariant(absolute_path, _) => {
                 let (ret_ty, arg_tys,is_variadic) = self.lc.functions.get(&absolute_path).unwrap();
                 self.equate_types(&expr.span, &expr.data_ty, ret_ty);

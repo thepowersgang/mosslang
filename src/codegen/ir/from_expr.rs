@@ -152,7 +152,7 @@ impl<'a,'b> Visitor<'a,'b> {
                 },
             ValueBinding::Function(absolute_path) => Value::FunctionPointer(absolute_path.clone(), super::FunctionPointerTy::Function),
             ValueBinding::DataEnumVariant(absolute_path, idx) => Value::FunctionPointer(absolute_path.clone(), super::FunctionPointerTy::DataEnum(*idx)),
-            ValueBinding::StructValue(absolute_path) => Value::FunctionPointer(absolute_path.clone(), super::FunctionPointerTy::Struct),
+            //ValueBinding::StructValue(absolute_path) => Value::FunctionPointer(absolute_path.clone(), super::FunctionPointerTy::Struct),
             }
         },
         ExprKind::CallPath(path, binding, exprs) => {
@@ -169,9 +169,7 @@ impl<'a,'b> Visitor<'a,'b> {
             },
             ValueBinding::Static(absolute_path) => panic!("{}: Unexpected CallPath on a static - {}", expr.span, absolute_path),
             ValueBinding::Constant(absolute_path) => panic!("{}: Unexpected CallPath on a constant - {}", expr.span, absolute_path),
-            ValueBinding::StructValue(absolute_path) => {
-                self.output.push_stmt(Operation::CreateComposite(rv, Some(absolute_path.clone()), a));
-            },
+            //ValueBinding::StructValue(absolute_path) => self.output.push_stmt(Operation::CreateComposite(rv, Some(absolute_path.clone()), a)),
             ValueBinding::DataEnumVariant(absolute_path, idx) => {
                 self.output.push_stmt(Operation::CreateDataVariant(rv, absolute_path.clone(), *idx, a));
             },
@@ -667,7 +665,7 @@ impl<'a,'b> Visitor<'a,'b> {
             ValueBinding::Local(_) => todo!("Can't match to a local?"),
             ValueBinding::Function(_) => todo!("Can't match to a function."),
             ValueBinding::Static(_) => panic!("{span}: Attempting to match against a static", span=pattern.span),
-            ValueBinding::StructValue(_) => {},
+            //ValueBinding::StructValue(_) => {},
             ValueBinding::Constant(absolute_path) => {
                 let cv = self.visit_expr( &self.parent.constants.get(absolute_path).expect("Missing constant?").e );
                 self.output.end_block(super::Terminator::Compare(value, super::CmpOp::Eq, cv,  bb_true, bb_false));
