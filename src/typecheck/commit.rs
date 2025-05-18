@@ -26,7 +26,7 @@ struct Visitor<'a> {
     ivars: &'a [super::ivars::IVarEnt],
 }
 impl<'a> Visitor<'a> {
-    fn commit_ivars_in(&self, span: &crate::Span, ty: &mut Type) {
+    fn commit_ivars_in(&mut self, span: &crate::Span, ty: &mut Type) {
         let _i = INDENT.inc_f("commit_ivars_in", format_args!("{ty}"));
         match &mut ty.kind {
         TypeKind::Infer { .. } => {
@@ -53,7 +53,10 @@ impl<'a> Visitor<'a> {
         TypeKind::Pointer { is_const: _, inner } => self.commit_ivars_in(span, inner),
         TypeKind::Array { inner, count: _ } => self.commit_ivars_in(span, inner),
         TypeKind::UnsizedArray(inner) => self.commit_ivars_in(span, inner),
-        TypeKind::TypeOf(_) => todo!("Commit ivars in typeof")
+        TypeKind::TypeOf(expr) => {
+            crate::ast::ExprVisitor::visit_mut_expr(self, &mut expr.0.e);
+            *ty = expr.0.e.data_ty.clone();
+        },
         }
     }
 }
@@ -64,6 +67,9 @@ impl<'a> crate::ast::ExprVisitor for Visitor<'a> {
         self.commit_ivars_in(&expr.span, &mut expr.data_ty);
         match expr.kind {
         crate::ast::expr::ExprKind::Cast(_, ref mut ty) => {
+            self.commit_ivars_in(&expr.span, ty);
+            },
+        crate::ast::expr::ExprKind::TypeInfoSizeOf(ref mut ty) => {
             self.commit_ivars_in(&expr.span, ty);
             }
         _ => {},

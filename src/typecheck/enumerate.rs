@@ -192,10 +192,38 @@ impl RuleEnumerate<'_, '_> {
         };
         self.rules.revisits.push((span.clone(), dst_ty.clone(), Revisit::Coerce(src_ty),));
     }
+    
+    pub fn visit_ty(&mut self, ty: &mut crate::ast::Type) {
+        match &mut ty.kind {
+        TypeKind::Infer { .. } => {},
+        TypeKind::Integer(..) => {},
+        TypeKind::Named(_, _) => {},
+        TypeKind::Void => {},
+        TypeKind::Bool => {},
+
+        TypeKind::Tuple(items) => {
+            for t in items {
+                self.visit_ty(t);
+            }
+        },
+        TypeKind::Pointer { is_const: _, inner } => {
+            self.visit_ty(inner);
+        },
+        TypeKind::Array { inner, count: _ } => {
+            self.visit_ty(inner);
+        },
+        TypeKind::UnsizedArray(inner) => {
+            self.visit_ty(inner);
+        },
+        TypeKind::TypeOf(inner) => {
+            crate::ast::ExprVisitor::visit_mut_expr(self, &mut inner.0.e);
+        },
+        }
+    }
 }
 impl<'a, 'b> crate::ast::ExprVisitor for RuleEnumerate<'a, 'b> {
     fn visit_mut_expr(&mut self, expr: &mut crate::ast::expr::Expr) {
-        let _i = INDENT.inc_f("visit_expr", format_args!("{:?} -> {}", &expr.kind, expr.data_ty));
+        let _i = INDENT.inc_f("RuleEnumerate::visit_expr", format_args!("{:?} -> {}", &expr.kind, expr.data_ty));
 
         // Loops need some special handling for `break`
         match &mut expr.kind {
@@ -251,7 +279,8 @@ impl<'a, 'b> crate::ast::ExprVisitor for RuleEnumerate<'a, 'b> {
             IntLitClass::Integer(int_class) => self.equate_types(&expr.span, &expr.data_ty, &Type::new_integer(expr.span.clone(), *int_class)),
             }
         }
-        ExprKind::TypeInfoSizeOf(_) => {
+        ExprKind::TypeInfoSizeOf(ty) => {
+            self.visit_ty(ty);
             self.equate_types(&expr.span, &expr.data_ty, &Type::new_integer(expr.span.clone(), crate::ast::ty::IntClass::PtrInt))
         },
         ExprKind::Return(value) => {
@@ -488,6 +517,7 @@ impl<'a, 'b> crate::ast::ExprVisitor for RuleEnumerate<'a, 'b> {
             },
             crate::ast::expr::Statement::Let(pattern, ty, expr) => {
                 self.visit_mut_pattern(pattern, false);
+                self.visit_ty(ty);
                 self.pattern_assign(pattern, ty);
                 if let Some(expr) = expr {
                     self.visit_mut_expr(expr);
