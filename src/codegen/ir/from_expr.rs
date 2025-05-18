@@ -16,12 +16,12 @@ struct Output {
 }
 
 pub struct Visitor<'a,'b> {
-    parent: &'a mut super::super::State<'b>,
+    parent: &'a super::super::State<'b>,
     loop_stack: Vec<LoopEntry>,
     output: Output,
 }
 impl<'a,'b> Visitor<'a,'b> {
-    pub fn new(parent: &'a mut super::super::State<'b>, locals: &[crate::ast::Type]) -> Self {
+    pub fn new(parent: &'a super::super::State<'b>, locals: &[crate::ast::Type]) -> Self {
         let mut rv = Visitor {
             parent,
             loop_stack: Vec::new(),
@@ -52,7 +52,10 @@ impl<'a,'b> Visitor<'a,'b> {
 
         ExprKind::LiteralString(data) => super::Value::StringLiteral(data.clone()),
         ExprKind::LiteralInteger(v, _int_lit_class) => super::Value::IntegerLiteral(*v),
-        ExprKind::TypeInfoSizeOf(_) => todo!(),
+        ExprKind::TypeInfoSizeOf(ty) => {
+            eprintln!("{}TODO: sizeof({})", expr.span, ty);
+            super::Value::IntegerLiteral(0)
+        },
 
         ExprKind::Return(expr) => {
             let e = if let Some(expr) = expr { self.visit_expr(expr) } else { Value::ImplicitUnit };
@@ -221,7 +224,32 @@ impl<'a,'b> Visitor<'a,'b> {
             Value::Local(rv, Default::default())
         },
         ExprKind::Struct(_, binding, values) => {
-            todo!("IR lower struct literal");
+            let Some(binding) = binding else { panic!() };
+            use crate::ast::path::TypeBinding;
+            match binding {
+            TypeBinding::Alias(absolute_path)
+            |TypeBinding::ValueEnum(absolute_path)
+            |TypeBinding::DataEnum(absolute_path) => todo!(),
+            TypeBinding::Union(absolute_path) => todo!(),
+            TypeBinding::Struct(absolute_path) => {
+                let Some(fields) = self.parent.fields.get(absolute_path) else { panic!() };
+                let mut out_values = vec![None; fields.len()];
+                for (name,value) in values {
+                    out_values[ fields[name] ] = Some( self.visit_expr(value) );
+                }
+                let a = out_values.into_iter()
+                    .map(|v| match v
+                        {
+                        Some(v) => v,
+                        None => panic!("{}Field not populated", expr.span),
+                        })
+                    .collect();
+                let rv = self.output.allocate_slot(&expr.data_ty);
+                self.output.push_stmt(super::Operation::CreateComposite(rv, Some(absolute_path.clone()), a));
+                Value::Local(rv, Default::default())
+            }
+            TypeBinding::EnumVariant(absolute_path, _) => todo!(),
+            }
         }
         ExprKind::FieldNamed(expr, ident) => {
             let v = self.visit_expr(expr);
@@ -329,10 +357,12 @@ impl<'a,'b> Visitor<'a,'b> {
             use crate::ast::ty::TypeKind;
             match (&expr.data_ty.kind, &val_expr.data_ty.kind) {
             (ref t1, ref t2) if t1 == t2 => v,
+            (TypeKind::Named(_, Some(b1)),TypeKind::Named(_, Some(b2))) if b1 == b2 => v,
             (TypeKind::Void, _) => Value::ImplicitUnit,
             (TypeKind::Pointer { .. },TypeKind::Pointer { .. }) => v,
             (TypeKind::Integer { .. },TypeKind::Integer { .. }) => v,   // TODO: Should this use an operation to truncate the value?
             (TypeKind::Integer { .. },TypeKind::Named(_, Some(crate::ast::path::TypeBinding::ValueEnum(_)))) => v,
+
             _ => todo!("{}: lower IR: convert {} to {} - {:?}", expr.span, val_expr.data_ty, expr.data_ty, v),
             }
         },

@@ -38,15 +38,18 @@ impl<'a> IvarEnumerate<'a> {
         TypeKind::UnsizedArray(inner) => {
             self.fill_ivars_in(inner);
         },
-        TypeKind::TypeOf(inner) => todo!("Recurse into expression for `TypeOf`?"),
+        TypeKind::TypeOf(inner) => {
+            crate::ast::ExprVisitor::visit_mut_expr(self, &mut inner.0.e);
+        },
         }
     }
 }
 
 impl<'a> crate::ast::ExprVisitor for IvarEnumerate<'a> {
     fn visit_mut_expr(&mut self, expr: &mut crate::ast::expr::Expr) {
+        use crate::ast::expr::ExprKind;
         match expr.kind {
-        crate::ast::expr::ExprKind::LiteralInteger(_, ref ty) => match ty {
+        ExprKind::LiteralInteger(_, ref ty) => match ty {
             crate::ast::expr::IntLitClass::Unspecified => {
                 expr.data_ty = Type { kind: TypeKind::Infer { kind: crate::ast::ty::InferKind::Integer, index: None }, span: expr.span.clone() };
             },
@@ -55,7 +58,10 @@ impl<'a> crate::ast::ExprVisitor for IvarEnumerate<'a> {
                 // Handled later on, as it doesn't need to worry about generating an ivar to be filled
                 },
             },
-        crate::ast::expr::ExprKind::Cast(_, ref mut ty) => {
+        ExprKind::Cast(_, ref mut ty) => {
+            self.fill_ivars_in(ty);
+            }
+        ExprKind::TypeInfoSizeOf(ref mut ty) => {
             self.fill_ivars_in(ty);
             }
         _ => {},
@@ -254,7 +260,9 @@ impl<'a, 'b> crate::ast::ExprVisitor for RuleEnumerate<'a, 'b> {
             IntLitClass::Integer(int_class) => self.equate_types(&expr.span, &expr.data_ty, &Type::new_integer(expr.span.clone(), *int_class)),
             }
         }
-        ExprKind::TypeInfoSizeOf(_) => self.equate_types(&expr.span, &expr.data_ty, &Type::new_integer(expr.span.clone(), crate::ast::ty::IntClass::PtrInt)),
+        ExprKind::TypeInfoSizeOf(_) => {
+            self.equate_types(&expr.span, &expr.data_ty, &Type::new_integer(expr.span.clone(), crate::ast::ty::IntClass::PtrInt))
+        },
         ExprKind::Return(value) => {
             if let Some(expr) = value {
                 self.equate_types(&expr.span, self.ret_ty, &expr.data_ty);

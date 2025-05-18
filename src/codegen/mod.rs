@@ -72,7 +72,7 @@ impl<'a> State<'a> {
 
         use ::std::io::Write;
         write!(self.ofp, "fn {name}() {{\n").unwrap();
-        ir::dump(&mut IndentFile(&mut self.ofp, true), &ir).unwrap();
+        ir::dump(&mut IndentFile(&mut &self.ofp, true), &ir).unwrap();
         write!(self.ofp, "}}\n\n").unwrap();
     }
     fn emit_static(&mut self, name: &super::Ident, s: &crate::ast::items::Static) {
