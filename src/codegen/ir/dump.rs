@@ -4,7 +4,7 @@ use super::{Terminator,Operation,Value};
 pub fn dump(dst: &mut dyn ::std::io::Write, src: &super::Expr) -> ::std::io::Result<()>
 {
     for (i,var_ty) in src.locals.iter().enumerate() {
-        writeln!(dst, "let _{}: {}", i, var_ty)?;
+        writeln!(dst, "let _{}: {};", i, var_ty)?;
     }
     for (i,block) in src.blocks.iter().enumerate() {
         writeln!(dst, "bb{}: {{", i)?;
