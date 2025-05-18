@@ -363,7 +363,29 @@ impl<'a,'b> Visitor<'a,'b> {
             (TypeKind::Integer { .. },TypeKind::Integer { .. }) => v,   // TODO: Should this use an operation to truncate the value?
             (TypeKind::Integer { .. },TypeKind::Named(_, Some(crate::ast::path::TypeBinding::ValueEnum(_)))) => v,
 
-            _ => todo!("{}: lower IR: convert {} to {} - {:?}", expr.span, val_expr.data_ty, expr.data_ty, v),
+            // Array to pointer
+            (TypeKind::Pointer { is_const, .. }, TypeKind::UnsizedArray { .. }) => {
+                match v {
+                Value::Local(local_index, wrapper_list) => {
+                    let rv = self.output.allocate_slot(&expr.data_ty);
+                    self.output.push_stmt(Operation::BorrowLocal(rv, !*is_const, local_index, wrapper_list));
+                    Value::Local(rv, Default::default())
+                },
+                Value::Named(absolute_path, wrapper_list) => {
+                    let rv = self.output.allocate_slot(&expr.data_ty);
+                    self.output.push_stmt(Operation::BorrowGlobal(rv, !*is_const, absolute_path, wrapper_list));
+                    Value::Local(rv, Default::default())
+                },
+                Value::Deref { ptr, wrappers  } => {
+                    let rv = self.output.allocate_slot(&expr.data_ty);
+                    self.output.push_stmt(Operation::PointerOffset(rv, !*is_const, ptr, wrappers));
+                    Value::Local(rv, Default::default())
+                },
+                _ => todo!("{}Lower IR: array->pointer cast: {} to {} - {:?}", expr.span, val_expr.data_ty, expr.data_ty, v),
+                }
+            }
+
+            _ => todo!("{}Lower IR: convert {} to {} - {:?}", expr.span, val_expr.data_ty, expr.data_ty, v),
             }
         },
         ExprKind::UniOp(uni_op_ty, expr) => {
