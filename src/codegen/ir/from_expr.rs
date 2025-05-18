@@ -227,9 +227,9 @@ impl<'a,'b> Visitor<'a,'b> {
             let Some(binding) = binding else { panic!() };
             use crate::ast::path::TypeBinding;
             match binding {
-            TypeBinding::Alias(absolute_path)
-            |TypeBinding::ValueEnum(absolute_path)
-            |TypeBinding::DataEnum(absolute_path) => todo!(),
+            TypeBinding::Alias(_)
+            |TypeBinding::ValueEnum(_)
+            |TypeBinding::DataEnum(_) => todo!(),
             TypeBinding::Union(absolute_path) => todo!(),
             TypeBinding::Struct(absolute_path) => {
                 let Some(fields) = self.parent.fields.get(absolute_path) else { panic!() };
@@ -363,7 +363,7 @@ impl<'a,'b> Visitor<'a,'b> {
             (TypeKind::Integer { .. },TypeKind::Integer { .. }) => v,   // TODO: Should this use an operation to truncate the value?
             (TypeKind::Integer { .. },TypeKind::Named(_, Some(crate::ast::path::TypeBinding::ValueEnum(_)))) => v,
 
-            // Array to pointer
+            // Array to pointer: Make a borrow
             (TypeKind::Pointer { is_const, .. }, TypeKind::UnsizedArray { .. }) => {
                 match v {
                 Value::Local(local_index, wrapper_list) => {

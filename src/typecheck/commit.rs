@@ -19,6 +19,9 @@ pub fn commit_to_expr(ivars: &mut [super::ivars::IVarEnt], expr: &mut crate::ast
     }
 
     let mut v = Visitor { ivars };
+    for ty in &mut expr.variables {
+        v.commit_ivars_in(&expr.e.span, ty);
+    }
     crate::ast::visit_mut_expr(&mut v, &mut expr.e);
 }
 
@@ -62,6 +65,23 @@ impl<'a> Visitor<'a> {
 }
 
 impl<'a> crate::ast::ExprVisitor for Visitor<'a> {
+    fn visit_mut_pattern(&mut self, pat: &mut crate::ast::Pattern, refutable: bool) {
+        //for binding in &pat.bindings {
+        //    self.binding.index.unwrap()
+        //}
+        match &mut pat.ty {
+        crate::ast::PatternTy::Any => {},
+        crate::ast::PatternTy::MaybeBind(_) => {}
+        crate::ast::PatternTy::NamedValue(..) => {}
+        crate::ast::PatternTy::Tuple(patterns) => {
+            self.commit_ivars_in(&pat.span, &mut pat.data_ty);
+            for pat in patterns {
+                self.visit_mut_pattern(pat, refutable);
+            }
+        }
+        }
+    }
+    
     fn visit_mut_expr(&mut self, expr: &mut crate::ast::expr::Expr) {
         let _i = INDENT.inc_f("commit: visit_expr", format_args!("{:?}", &expr.kind));
         self.commit_ivars_in(&expr.span, &mut expr.data_ty);
