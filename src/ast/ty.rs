@@ -37,7 +37,7 @@ impl Type
     }
     pub fn new_infer(span: crate::Span) -> Self {
         Type {
-            kind: TypeKind::Infer { index: None, kind: InferKind::None },
+            kind: TypeKind::Infer { index: None },
             span,//: crate::Span::new_null(),
         }
     }
@@ -98,18 +98,13 @@ impl Type
 
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>, is_debug: bool) -> std::fmt::Result {
         match &self.kind {
-        TypeKind::Infer { kind, index } => {
+        TypeKind::Infer { index } => {
             f.write_str("_")?;
             if let Some(index) = index {
-                write!(f, "#{}", index)?
+                write!(f, "#{}", index)
             }
             else {
-                write!(f, "#?")?
-            }
-            match kind {
-            InferKind::None => Ok(()),
-            InferKind::Integer => f.write_str("i"),
-            InferKind::Float => f.write_str("f"),
+                write!(f, "#?")
             }
         },
         TypeKind::Bool => f.write_str("bool"),
@@ -269,7 +264,6 @@ pub enum TypeKind
 {
     /// An omitted type
     Infer {
-        kind: InferKind,
         index: Option<usize>,
     },
     /// A type that cannot exist, used for untyped pointers
@@ -297,14 +291,4 @@ pub enum TypeKind
     UnsizedArray(Box<Type>),
     /// Evaluates to the type of an expression (during typecheck)
     TypeOf(ExprInType),
-}
-#[derive(Clone,Debug)]
-#[derive(PartialOrd,Ord,PartialEq,Eq)]
-pub enum InferKind {
-    /// No type-class information available
-    None,
-    /// This ivar must be an integer type
-    Integer,
-    /// This ivar must be a floating point type
-    Float,
 }

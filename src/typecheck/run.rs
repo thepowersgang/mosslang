@@ -2,7 +2,7 @@
 //! 
 //! I.e. [typecheck_expr]
 use crate::INDENT;
-use crate::ast::ty::{Type,TypeKind,InferKind};
+use crate::ast::ty::{Type,TypeKind};
 use super::{enumerate,Rules,Revisit};
 use super::ivars::InferType;
 use super::ivars::{equate_types,get_ivar,get_infer_kind};
@@ -76,7 +76,7 @@ pub(super) fn typecheck_expr(lc: &super::LookupContext, ret_ty: &crate::ast::Typ
                     v.clear();
                     continue;
                 };
-                let dst_ty = Type { kind: TypeKind::Infer { kind: InferKind::None, index: Some(*idx) }, span: crate::Span::new_null() };
+                let dst_ty = Type { kind: TypeKind::Infer { index: Some(*idx) }, span: crate::Span::new_null() };
                 // Resolve ivars
                 *v = ::std::mem::take(v).into_iter().map(|(ty,is_to)| (get_ivar(&ivars, &ty).clone(), is_to) ).collect();
                 println!("{INDENT} #{}: {:?}", idx, v);
@@ -147,16 +147,17 @@ fn check_revisit(ir: &mut IvarRules, lc: &super::LookupContext, ivars: &mut [sup
         _ if ::std::ptr::eq(t_l, t_r) => R::Consume,
         _ if t_l == t_r => R::Consume,
         // Ivars do magic things
-        (TypeKind::Infer { index: i_l, kind: InferKind::None }, TypeKind::Infer { index: i_r, kind: InferKind::None }) => {
+        // - TODO: Handle integers with infer kinds?
+        (TypeKind::Infer { index: i_l }, TypeKind::Infer { index: i_r }) => {
             ir.coerce_from(i_l.unwrap(), t_r.clone());
             ir.coerce_to(i_r.unwrap(), t_l.clone());
             R::Keep
             },
-        (TypeKind::Infer { index: i_l, kind: InferKind::None }, _) => {
+        (TypeKind::Infer { index: i_l }, _) => {
             ir.coerce_from(i_l.unwrap(), t_r.clone());
             R::Keep
             },
-        (_, TypeKind::Infer { index: i_r, kind: InferKind::None }) => {
+        (_, TypeKind::Infer { index: i_r }) => {
             ir.coerce_to(i_r.unwrap(), t_l.clone());
             R::Keep
             },

@@ -13,7 +13,7 @@ impl<'a> IvarEnumerate<'a> {
     }
     pub fn fill_ivars_in(&mut self, ty: &mut crate::ast::Type) {
         match &mut ty.kind {
-        TypeKind::Infer { index, kind } => {
+        TypeKind::Infer { index } => {
             if index.is_none() {
                 *index = Some(self.ivars.len());
                 self.ivars.push(super::ivars::IVarEnt::new());
@@ -49,15 +49,6 @@ impl<'a> crate::ast::ExprVisitor for IvarEnumerate<'a> {
     fn visit_mut_expr(&mut self, expr: &mut crate::ast::expr::Expr) {
         use crate::ast::expr::ExprKind;
         match expr.kind {
-        ExprKind::LiteralInteger(_, ref ty) => match ty {
-            crate::ast::expr::IntLitClass::Unspecified => {
-                expr.data_ty = Type { kind: TypeKind::Infer { kind: crate::ast::ty::InferKind::Integer, index: None }, span: expr.span.clone() };
-            },
-            crate::ast::expr::IntLitClass::Pointer
-            |crate::ast::expr::IntLitClass::Integer(_) => {
-                // Handled later on, as it doesn't need to worry about generating an ivar to be filled
-                },
-            },
         ExprKind::Cast(_, ref mut ty) => {
             self.fill_ivars_in(ty);
             }
