@@ -136,7 +136,7 @@ fn typecheck_mod(lc: &LookupContext, module: &mut crate::ast::items::Module)
         ItemType::Union(_) => {
         },
         ItemType::Function(function) => {
-            println!("{INDENT}resolve_mod: Function {}", v.name.as_ref().unwrap());
+            println!("{INDENT}typecheck_mod: Function {}", v.name.as_ref().unwrap());
             typecheck_expr(lc, &function.sig.ret, &mut function.code, &mut function.sig.args);
         },
         ItemType::Static(i) => {

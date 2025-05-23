@@ -80,6 +80,7 @@ impl Type
             span,
         }
     }
+
     pub fn new_array_expr(span: crate::Span, inner: Type, count: crate::ast::ExprRoot) -> Self {
         Type {
             kind: TypeKind::Array { inner: Box::new(inner), count: ArraySize::Unevaluated(Box::new(count)), },
@@ -89,6 +90,12 @@ impl Type
     pub fn new_array_fixed(span: crate::Span, inner: Type, count: usize) -> Self {
         Type {
             kind: TypeKind::Array { inner: Box::new(inner), count: ArraySize::Known(count), },
+            span,
+        }
+    }
+    pub fn new_array_unsized(span: crate::Span, inner: Type) -> Self {
+        Type {
+            kind: TypeKind::UnsizedArray( Box::new(inner) ),
             span,
         }
     }

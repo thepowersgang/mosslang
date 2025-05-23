@@ -105,11 +105,47 @@ pub(super) fn typecheck_expr(lc: &super::LookupContext, ret_ty: &crate::ast::Typ
                     changed = true;
                     continue ;
                 }
+
+                // If the same type is a source and a destination, use it
+                fn find_shared(v: &std::collections::BTreeSet<(Type,bool)>) -> Option<&Type> {
+                    let options_dst = v.iter().filter(|(_,to)| *to);
+                    let options_src = v.iter().filter(|(_,to)| !*to);
+                    for (ty_d,_) in options_dst {
+                        for (ty_s,_) in options_src.clone() {
+                            if ty_d == ty_s {
+                                return Some(ty_d);
+                            }
+                        }
+                    }
+                    None
+                }
+                if let Some(ty) = find_shared(v) {
+                    println!("{INDENT} IVar #{} = {} (src/dst)", idx, ty);
+                    equate_types(&root_span, &mut ivars, &dst_ty, ty);
+                    changed = true;
+                    continue ;
+                }
+
                 // TODO: Advanced rules
                 // > Example: `#1 = { to void, to c_char }` should pick `c_char` as that can convert to `void` but the reverse is not true
             }
         }
-        assert!(changed, "Loop with no changes");
+        if !changed {
+            eprintln!("{}Loop with no changes", expr.e.span);
+            for (idx, v) in &ir.ivars {
+                if v.len() == 0 {
+                    continue;
+                }
+                let TypeKind::Infer { index: None, .. } = ivars[*idx].ty.kind else {
+                    continue;
+                };
+                eprintln!("- #{}: {:?}", idx, v);
+            }
+            for (span, dst_ty, op) in &rules.revisits {
+                println!("{span}{dst_ty:?} = {op:?}");
+            }
+            panic!("{}Loop with no changes", expr.e.span);
+        }
     }
     
     // Check that everything is complete
@@ -238,7 +274,8 @@ fn check_revisit(ir: &mut IvarRules, lc: &super::LookupContext, ivars: &mut [sup
         TypeKind::Infer { .. } => R::Keep,
 
         TypeKind::Pointer { inner, .. }
-        | TypeKind::Array { inner, .. } => {
+        | TypeKind::Array { inner, .. }
+        | TypeKind::UnsizedArray(inner) => {
             let inner = (*inner).clone();
             equate_types(span, ivars, dst_ty, &inner);
             //equate_types(&mut ivars, &Type::new_integer(crate::ast::ty::IntClass::PtrInt), index_ty);

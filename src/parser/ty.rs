@@ -64,7 +64,7 @@ pub fn parse_type(lex: &mut Lexer) -> Result<crate::ast::Type> {
             }
             else if lex.opt_consume_punct(lex::Punct::TripleDot)? {
                 lex.consume_punct(lex::Punct::SquareClose)?;
-                Ok(Type { span: lex.end_span(&ps), kind: crate::ast::ty::TypeKind::UnsizedArray(Box::new(inner)) })
+                Ok(Type::new_array_unsized(lex.end_span(&ps), inner))
             }
             else {
                 let count = super::expr::parse_root_expr(lex)?;
