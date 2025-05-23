@@ -2,33 +2,34 @@
 //use libc::{FILE, c_char};
 
 type c_char = i8;
+type c_STR = [c_char; ...];
 struct FILE { ... }
 const SEEK_END: i32 = -1;
 extern "C" {
-    fn perror(msg: *const c_char);
-    fn fprintf(_: *mut FILE, fmt: *const c_char, ...);
+    fn perror(msg: *const c_STR);
+    fn fprintf(_: *mut FILE, fmt: *const c_STR, ...);
     static stderr: *mut FILE;
-    fn fopen(path: *const c_char, mode: *const c_char) -> *mut FILE;
+    fn fopen(path: *const c_STR, mode: *const c_STR) -> *mut FILE;
     fn fseek(fp: *mut FILE, ofs: i64, dir: i32);
     fn ftell(fp: *mut FILE) -> u64;
     fn fgetc(fp: *mut FILE) -> i32;
     fn fclose(fp: *mut FILE);
     
     // string.h
-    fn strerror(errnum: i32) -> *mut c_char;
-    fn strlen(s: *const c_char) -> usize;
-	fn strcmp(s1: *const c_char, s2: *const c_char) -> i32;
-	fn strncmp(s1: *const c_char, s2: *const c_char, max_len: usize) -> i32;
-	fn strcpy(d: *mut c_char, s: *const c_char) -> *mut c_char;
-	fn strstr(s1: *const c_char, s2: *const c_char) -> *const c_char;
-	fn strchr(s1: *const c_char, c: c_char) -> *const c_char;
-	fn strrstr(s1: *const c_char, s2: *const c_char) -> *const c_char;
-	fn strrchr(s1: *const c_char, c: c_char) -> *const c_char;
+    fn strerror(errnum: i32) -> *mut c_STR;
+    fn strlen(s: *const c_STR) -> usize;
+	fn strcmp(s1: *const c_STR, s2: *const c_STR) -> i32;
+	fn strncmp(s1: *const c_STR, s2: *const c_STR, max_len: usize) -> i32;
+	fn strcpy(d: *mut c_STR, s: *const c_STR) -> *mut c_STR;
+	fn strstr(s1: *const c_STR, s2: *const c_STR) -> *const c_STR;
+	fn strchr(s1: *const c_STR, c: c_char) -> *const c_STR;
+	fn strrstr(s1: *const c_STR, s2: *const c_STR) -> *const c_STR;
+	fn strrchr(s1: *const c_STR, c: c_char) -> *const c_STR;
 	fn memcmp(s1: *const void, s2: *const void, count: usize) -> i32;
 	fn memcpy(dst: *mut void, src: *const void, count: usize) -> *mut void;
     
     // stdlib.h
-    fn getenv(name: *const c_char) -> *mut c_char;
+    fn getenv(name: *const c_STR) -> *mut c_STR;
     fn exit(status: i32);// -> !;
 	fn malloc(size: usize) -> *mut void;    // TODO: Make a type that can be coerced to anything (`void` can coerce _from_ anything)
 	fn realloc(old: *mut void, size: usize) -> *mut void;
@@ -51,11 +52,11 @@ enum Token {
 }
 
 struct Lexer {
-    filename: *const c_char,
+    filename: *const c_STR,
     file: *mut FILE,
     cur_line: u32,
     last_token: Token,
-    string: *const c_char,
+    string: *const c_STR,
 }
 struct OutState {
     next_inode_idx: u32,
@@ -64,7 +65,7 @@ struct OutState {
     out_ldopts: *mut FILE,
     //out_dep: *mut FILE,
 
-    dependencies: *mut *const c_char,
+    dependencies: *mut [*const c_STR; ...],
     num_dependencies: usize,
 }
 struct DirEnt {
@@ -73,10 +74,10 @@ struct DirEnt {
 }
 struct DirEnts {
     num_ents: usize,
-    ents: *mut *mut DirEnt,
+    ents: *mut [*mut DirEnt; ...],
 }
 
-extern "C" fn main(argc: usize, argv: *const *const c_char) -> i32 {
+extern "C" fn main(argc: usize, argv: *const [*const c_STR; ...]) -> i32 {
     let infile = 0p;
     let outfile_c = 0p;
     let outfile_dep = 0p;
@@ -85,7 +86,7 @@ extern "C" fn main(argc: usize, argv: *const *const c_char) -> i32 {
     for arg_i in 1 .. argc
     {
         let arg = argv[arg_i];
-        if *arg != '-' {
+        if arg[0] != '-' {
             if infile == 0p {
                 infile = arg;
             }
@@ -246,22 +247,22 @@ fn ProcessDir(lex: *mut Lexer, os: *mut OutState, inode: u32, end: Token)
 		);
 	Lex_Consume(lex);
 }
-fn add_dir_ent(dents: *mut DirEnts, name: *const c_char, inode: u32) {
+fn add_dir_ent(dents: *mut DirEnts, name: *const c_STR, inode: u32) {
 	let de = malloc( sizeof(DirEnt) + strlen(name) + 1 ) as *mut DirEnt;
 	de.*.inode = inode;
-	strcpy(de.*.name, name);
+	strcpy(&mut de.*.name, name);
 	
 	dents.*.num_ents += 1;
-	dents.*.ents = realloc( dents.*.ents, sizeof(*mut DirEnt) * dents.*.num_ents ) as *mut *mut DirEnt;
+	dents.*.ents = realloc( dents.*.ents, sizeof(*mut DirEnt) * dents.*.num_ents ) as *mut [*mut DirEnt; ...];
 	//assert(dents.*.ents);
 	dents.*.ents[dents.*.num_ents-1] = de;
 }
 
-fn AddFile(os: *mut OutState, dents: *mut DirEnts, is_opt: bool, name: *const c_char, path: *const c_char)
+fn AddFile(os: *mut OutState, dents: *mut DirEnts, is_opt: bool, name: *const c_STR, path: *const c_STR)
 {
 	let realpath = {
 		let len = expand_path(0p, path);
-		let realpath = malloc(len+1) as *mut c_char;
+		let realpath = malloc(len+1) as *mut c_STR;
 		expand_path(realpath, path);
         realpath
 	};
@@ -289,7 +290,7 @@ fn AddFile(os: *mut OutState, dents: *mut DirEnts, is_opt: bool, name: *const c_
 
 	fprintf(os.*.out_ldopts, "%s\n", realpath);
 	
-	let binary_sym = malloc(strlen(realpath)+1) as *mut c_char; // `as *mut _` breaks type inference currently
+	let binary_sym = malloc(strlen(realpath)+1) as *mut c_STR; // `as *mut _` breaks type inference currently
 	ld_mangle(binary_sym, realpath);
 	
 	fprintf(os.*.out_c, "extern Uint8 _binary_%s_start[];\n", binary_sym);
@@ -317,7 +318,7 @@ fn AddFile(os: *mut OutState, dents: *mut DirEnts, is_opt: bool, name: *const c_
 /// Expand variables in a path
 /// 
 /// Returns the length of the written string
-fn expand_path(out: *mut c_char, src: *const c_char) -> usize {
+fn expand_path(out: *mut c_STR, src: *const c_STR) -> usize {
 	let rv = 0;
 	
 	while *src != 0 {
@@ -359,7 +360,7 @@ fn expand_path(out: *mut c_char, src: *const c_char) -> usize {
 			}
 		}
 		else {
-            if out != 0p { out[rv] = *src; }
+            if out != 0p { out[rv] = src[0]; }
             rv += 1;
 			src += 1;
 		}
@@ -369,7 +370,8 @@ fn expand_path(out: *mut c_char, src: *const c_char) -> usize {
 	return rv;
 }
 /// Return a version of a name mangled such that it's a valid `ld` symbol
-fn ld_mangle(out: *mut c_char, src: *mut c_char) -> usize {
+fn ld_mangle(out: *mut c_STR, src: *const c_STR) -> usize {
+	let src: *const c_char = src;
 	let rv = 0;
 	while *src != 0 {
 		/*match *src {
@@ -393,7 +395,7 @@ fn ld_mangle(out: *mut c_char, src: *mut c_char) -> usize {
 // --------------------------------------------------------------------
 // Lexer
 // --------------------------------------------------------------------
-fn Lex_Init(filename: *const c_char, fp: *mut FILE) -> Lexer
+fn Lex_Init(filename: *const c_STR, fp: *mut FILE) -> Lexer
 {
     let rv = Lexer {
         filename: filename,
@@ -424,14 +426,14 @@ fn Lex_Consume(lex: *mut Lexer)
 	lex.*.string = 0p;
 	Lex_Advance(lex);
 }
-fn Lex_ConsumeYield(lex: *mut Lexer) -> *mut c_char
+fn Lex_ConsumeYield(lex: *mut Lexer) -> *mut c_STR
 {
 	let rv = lex.*.string;
 	lex.*.string = 0p;
 	Lex_Advance(lex);
 	rv
 }
-fn Lex_Error(lex: *const Lexer, string: *const c_char)// -> !
+fn Lex_Error(lex: *const Lexer, string: *const c_STR)// -> !
 {
 	fprintf(stderr, "%s:%u: Parse error: %s\n", lex.*.filename, lex.*.cur_line, string);
 	exit(1);
@@ -444,7 +446,7 @@ fn Lex_Expect(lex: *const Lexer, exp: Token)
 	}
 }
 
-fn get_token_int(ifp: *mut FILE, string: *mut *const c_char) -> Token {
+fn get_token_int(ifp: *mut FILE, string: *mut *const c_STR) -> Token {
 	let ch = fgetc(ifp);
 	
 	while isblank(ch) {
@@ -510,7 +512,7 @@ fn get_token_int(ifp: *mut FILE, string: *mut *const c_char) -> Token {
 // --------------------------------------------------------------------
 // Extended libc
 // --------------------------------------------------------------------
-fn strdup(s: *const c_char) -> *mut c_char
+fn strdup(s: *const c_STR) -> *mut c_STR
 {
 	let rv = malloc(strlen(s) + 1);
 	if rv != 0p {

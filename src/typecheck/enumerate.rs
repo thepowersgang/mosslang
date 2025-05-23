@@ -269,7 +269,12 @@ impl<'a, 'b> crate::ast::ExprVisitor for RuleEnumerate<'a, 'b> {
             }
         },
         ExprKind::LiteralString(_) => {
-            self.equate_types(&expr.span, &expr.data_ty, &Type::new_ptr(expr.span.clone(), true, Type::new_integer(expr.span.clone(), crate::ast::ty::IntClass::Signed(0))));
+            let type_cstring = Type::new_ptr(expr.span.clone(), true,
+                Type::new_array_unsized(expr.span.clone(),
+                    Type::new_integer(expr.span.clone(), crate::ast::ty::IntClass::Signed(0))
+                    )
+                );
+            self.equate_types(&expr.span, &expr.data_ty, &type_cstring);
         },
         ExprKind::LiteralInteger(_, int_lit_class) => {
             use crate::ast::expr::IntLitClass;

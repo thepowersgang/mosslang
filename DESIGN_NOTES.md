@@ -60,6 +60,9 @@ A modern C, but with rust-like syntax
 - NULL pointers?
   - Could just have `0` coerce to nullptr
 
+- IDEA: Have an unsized array type and don't treat pointers as arrays like C does
+  - Pointer arithmatic is still "allowed", but indexing requires an array type?
+
 ## Option: Just make this C with rust syntax
 - No slices, no generics.
   - Generics open a lot of questions

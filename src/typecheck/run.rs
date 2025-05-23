@@ -270,18 +270,29 @@ fn check_revisit(ir: &mut IvarRules, lc: &super::LookupContext, ivars: &mut [sup
         }
         _ => panic!("{span}: Type error: Deref on unsupported type {:?}", inner_ty),
         },
-    Revisit::Index(val_ty, _index_ty) => match &get_ivar(&ivars, val_ty).kind {
+    Revisit::Index(val_ty, _index_ty) => {
+        let mut val_ty = val_ty;
+        // Apply autoderef
+        while let TypeKind::Pointer { inner, .. } = &get_ivar(&ivars, val_ty).kind {
+            val_ty = &inner;
+        }
+        match &get_ivar(&ivars, val_ty).kind {
         TypeKind::Infer { .. } => R::Keep,
 
-        TypeKind::Pointer { inner, .. }
-        | TypeKind::Array { inner, .. }
+        //TypeKind::Pointer { inner, .. } => {
+        //    let inner = (*inner).clone();
+        //    equate_types(span, ivars, dst_ty, &inner);
+        //    R::Consume
+        //}
+        TypeKind::Array { inner, .. }
         | TypeKind::UnsizedArray(inner) => {
             let inner = (*inner).clone();
             equate_types(span, ivars, dst_ty, &inner);
             //equate_types(&mut ivars, &Type::new_integer(crate::ast::ty::IntClass::PtrInt), index_ty);
             R::Consume
         }
-        _ => panic!("{span}: Type error: Index on unsupported type {:?}", val_ty),
+        _ => panic!("{span}: Type error: Index on unsupported type {:?}", get_ivar(&ivars, val_ty)),
+        }
         },
     Revisit::FieldNamed(ty, name) => {
         use crate::ast::path::TypeBinding;

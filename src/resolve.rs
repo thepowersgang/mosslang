@@ -388,6 +388,14 @@ impl crate::ast::ExprVisitor for Context<'_> {
     }
     fn visit_mut_block(&mut self, block: &mut crate::ast::expr::Block) {
         self.layers.push(ContextLayer::default());
+        for s in &mut block.statements {
+            match s {
+            crate::ast::expr::Statement::Let(_pattern, ty, _expr) => {
+                self.resolve_type(ty);
+            },
+            _ => {},
+            }
+        }
         crate::ast::visit_mut_block(self, block);
         self.layers.pop();
     }
