@@ -20,7 +20,7 @@ impl<'a> IvarEnumerate<'a> {
             }
         },
         TypeKind::Integer(_int_class) => {},
-        TypeKind::Named(_, _) => {},
+        TypeKind::Named(_) => {},
         TypeKind::Void => {},
         TypeKind::Bool => {},
 
@@ -125,11 +125,7 @@ impl RuleEnumerate<'_, '_> {
                 ValueBinding::ValueEnumVariant(absolute_path, _) => {
                     // TODO: If this is a data variant, then it should be a function pointer
                     let ap = AbsolutePath(absolute_path.0[..absolute_path.0.len()-1].to_owned());
-                    let mut enum_ty = Type::new_path(pattern.span.clone(), crate::ast::Path { root: crate::ast::path::Root::Root, components: ap.0.clone() });
-                    let TypeKind::Named(_, ref mut binding) = enum_ty.kind else { panic!(); };
-                    *binding = Some(crate::ast::path::TypeBinding::ValueEnum(ap));
-
-                    tmp_ty = enum_ty;
+                    tmp_ty = Type::new_path_resolved(pattern.span.clone(), crate::ast::path::TypeBinding::ValueEnum(ap));
                     &tmp_ty
                     },
                 _ => todo!("Check equality - {:?} and {:?}", ty, path),
@@ -197,7 +193,7 @@ impl RuleEnumerate<'_, '_> {
         match &mut ty.kind {
         TypeKind::Infer { .. } => {},
         TypeKind::Integer(..) => {},
-        TypeKind::Named(_, _) => {},
+        TypeKind::Named(_) => {},
         TypeKind::Void => {},
         TypeKind::Bool => {},
 
@@ -351,11 +347,7 @@ impl<'a, 'b> crate::ast::ExprVisitor for RuleEnumerate<'a, 'b> {
                 },
                 ValueBinding::ValueEnumVariant(absolute_path, _) => {
                     let ap = absolute_path.parent();
-                    let mut enum_ty = Type::new_path(expr.span.clone(), crate::ast::Path { root: crate::ast::path::Root::Root, components: ap.0.clone() });
-                    let TypeKind::Named(_, ref mut binding) = enum_ty.kind else { panic!(); };
-                    *binding = Some(crate::ast::path::TypeBinding::ValueEnum(ap));
-
-                    tmp_ty = enum_ty;
+                    tmp_ty = Type::new_path_resolved(expr.span.clone(), crate::ast::path::TypeBinding::ValueEnum(ap));;
                     &tmp_ty
                 },
                 };
@@ -395,7 +387,7 @@ impl<'a, 'b> crate::ast::ExprVisitor for RuleEnumerate<'a, 'b> {
             let ty = Type::new_tuple( expr.span.clone(), exprs.iter().map(|e| e.data_ty.clone()).collect() );
             self.equate_types(&expr.span, &expr.data_ty, &ty);
         },
-        ExprKind::Struct(name, binding, values) => {
+        ExprKind::Struct(_name, binding, values) => {
             let Some(binding) = binding else { panic!("{}Unresolved Struct", expr.span) };
             use crate::ast::path::TypeBinding;
             match binding {
@@ -415,7 +407,7 @@ impl<'a, 'b> crate::ast::ExprVisitor for RuleEnumerate<'a, 'b> {
             },
             TypeBinding::EnumVariant(absolute_path, _) => todo!("{}struct literal - enum variant?", expr.span),
             }
-            let ty = Type { kind: TypeKind::Named(name.clone(), Some(binding.clone())), span: expr.span.clone() };
+            let ty = Type::new_path_resolved(expr.span.clone(), binding.clone());
             self.equate_types(&expr.span, &expr.data_ty, &ty);
         }
         ExprKind::FieldNamed(expr_v, ident) => {

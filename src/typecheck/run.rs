@@ -296,11 +296,12 @@ fn check_revisit(ir: &mut IvarRules, lc: &super::LookupContext, ivars: &mut [sup
         },
     Revisit::FieldNamed(ty, name) => {
         use crate::ast::path::TypeBinding;
+        use crate::ast::ty::TypePath::Resolved;
         let ty = get_ivar(&ivars, ty);
         match &ty.kind {
         TypeKind::Infer { .. } => R::Keep,
-        TypeKind::Named(_, Some(TypeBinding::Alias(_))) => panic!("Unresolved type alias - {}", ty),
-        TypeKind::Named(_, Some(TypeBinding::Union(p) | TypeBinding::Struct(p))) => {
+        TypeKind::Named(Resolved(TypeBinding::Alias(_))) => panic!("Unresolved type alias - {}", ty),
+        TypeKind::Named(Resolved(TypeBinding::Union(p) | TypeBinding::Struct(p))) => {
             let Some(f) = lc.fields.get(p) else { panic!("{span}: BUG: No fields on {}", ty) };
             let Some(fld_ty) = f.get(name) else {
                 panic!("{span}: No field {} on type {}", name, ty);
@@ -316,7 +317,7 @@ fn check_revisit(ir: &mut IvarRules, lc: &super::LookupContext, ivars: &mut [sup
         let ty = get_ivar(&ivars, ty);
         match &ty.kind {
         TypeKind::Infer { .. } => R::Keep,
-        TypeKind::Named(_, Some(TypeBinding::Alias(_))) => panic!("Unresolved type alias - {}", ty),
+        TypeKind::Named(crate::ast::ty::TypePath::Resolved(TypeBinding::Alias(_))) => panic!("Unresolved type alias - {}", ty),
         TypeKind::Tuple(flds) => {
             let Some(fld_ty) = flds.get(*idx) else {
                 panic!("{span}: No field index {} on type {}", idx, ty);

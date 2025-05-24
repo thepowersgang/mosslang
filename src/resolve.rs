@@ -245,9 +245,9 @@ impl<'a> Context<'a> {
                 self.resolve_type(ty);
             }
         },
-        TypeKind::Named(path, ref mut binding) => {
-            if binding.is_none() {
-                let r = resolve_path_type(self.item_scope, &ty.span, path);
+        TypeKind::Named(ref mut path) => {
+            if let crate::ast::ty::TypePath::Unresolved(raw_path) = path {
+                let r = resolve_path_type(self.item_scope, &ty.span, raw_path);
                 if let TypeBinding::Alias(t) = r {
                     let a = self.item_scope.lc.type_alises.get(&t).expect("Missing TypeAlias");
                     *ty = a.clone();
@@ -255,7 +255,7 @@ impl<'a> Context<'a> {
                     self.resolve_type(ty);
                 }
                 else {
-                    *binding = Some(r);
+                    *path = crate::ast::ty::TypePath::Resolved(r);
                 }
             }
         },

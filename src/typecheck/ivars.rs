@@ -263,7 +263,7 @@ fn equate_type_kind(ivars: &mut [IVarEnt], l: &TypeKind, r: &TypeKind) -> Result
         Ok(())
     },
     (TypeKind::Tuple { .. }, _) => Err((l.clone(),r.clone())),
-    (TypeKind::Named(_, binding_l), TypeKind::Named(_, binding_r)) => {
+    (TypeKind::Named(binding_l), TypeKind::Named(binding_r)) => {
         if binding_l != binding_r {
             return Err((l.clone(),r.clone()));
         }

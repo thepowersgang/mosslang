@@ -43,7 +43,13 @@ impl Type
     }
     pub fn new_path(span: crate::Span, p: super::Path) -> Self {
         Type {
-            kind: TypeKind::Named(p, None),
+            kind: TypeKind::Named(TypePath::Unresolved(p)),
+            span,
+        }
+    }
+    pub fn new_path_resolved(span: crate::Span, p: super::path::TypeBinding) -> Self {
+        Type {
+            kind: TypeKind::Named(TypePath::Resolved(p)),
             span,
         }
     }
@@ -131,8 +137,9 @@ impl Type
             }
             f.write_str(")")
         },
-        TypeKind::Named(path, type_binding) => {
-            if let Some(tb) = type_binding {
+        TypeKind::Named(path) => {
+            match path {
+            TypePath::Resolved(tb) => {
                 use super::path::TypeBinding;
                 let (t, path) = match tb {
                     TypeBinding::Alias(absolute_path) => ("alias", absolute_path),
@@ -148,9 +155,10 @@ impl Type
                 else {
                     write!(f, "{}", path)
                 }
-            }
-            else {
+                },
+            TypePath::Unresolved(path) => {
                 write!(f, "{:?}", path)
+                },
             }
         },
         TypeKind::Pointer { is_const, inner } => {
@@ -283,7 +291,7 @@ pub enum TypeKind
     /// A tuple - anonymous collection of values
     Tuple(Vec<Type>),
     /// A named type
-    Named(super::Path, Option<super::path::TypeBinding>),
+    Named(TypePath),
     /// Pointer to data
     Pointer {
         is_const: bool,
@@ -298,4 +306,10 @@ pub enum TypeKind
     UnsizedArray(Box<Type>),
     /// Evaluates to the type of an expression (during typecheck)
     TypeOf(ExprInType),
+}
+#[derive(Clone,Debug)]
+#[derive(PartialOrd,Ord,PartialEq,Eq)]
+pub enum TypePath {
+    Unresolved(super::Path),
+    Resolved(super::path::TypeBinding),
 }

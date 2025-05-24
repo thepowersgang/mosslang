@@ -53,8 +53,7 @@ impl<'a,'b> Visitor<'a,'b> {
         ExprKind::LiteralString(data) => super::Value::StringLiteral(data.clone()),
         ExprKind::LiteralInteger(v, _int_lit_class) => super::Value::IntegerLiteral(*v),
         ExprKind::TypeInfoSizeOf(ty) => {
-            eprintln!("{}TODO: sizeof({})", expr.span, ty);
-            super::Value::IntegerLiteral(0)
+            super::Value::IntegerLiteral( self.parent.type_info(ty).size() as u128 )
         },
 
         ExprKind::Return(expr) => {
@@ -233,7 +232,7 @@ impl<'a,'b> Visitor<'a,'b> {
                 let Some(fields) = self.parent.fields.get(absolute_path) else { panic!() };
                 let mut out_values = vec![None; fields.len()];
                 for (name,value) in values {
-                    out_values[ fields[name] ] = Some( self.visit_expr(value) );
+                    out_values[ fields[name].0 ] = Some( self.visit_expr(value) );
                 }
                 let a = out_values.into_iter()
                     .map(|v| match v
@@ -252,12 +251,12 @@ impl<'a,'b> Visitor<'a,'b> {
         ExprKind::FieldNamed(expr, ident) => {
             let v = self.visit_expr(expr);
             let data_ty = match &expr.data_ty.kind {
-                crate::ast::ty::TypeKind::Named(_, Some(crate::ast::path::TypeBinding::Struct(p))) => p,
+                crate::ast::ty::TypeKind::Named(crate::ast::ty::TypePath::Resolved(crate::ast::path::TypeBinding::Struct(p))) => p,
                 //crate::ast::ty::TypeKind::Named(_, Some(crate::ast::path::TypeBinding::Union(p))) => p,
                 _ => panic!("Unexpected type for named field - {}", expr.data_ty),
                 };
             let Some(ty_fields) = self.parent.fields.get(data_ty) else { panic!("Type {} not in fields cache", data_ty) };
-            let Some(&idx) = ty_fields.get(ident) else { panic!() };
+            let Some(&(idx,_)) = ty_fields.get(ident) else { panic!() };
             v.field(idx)
         },
         ExprKind::FieldIndex(expr, _) => todo!(),
@@ -355,11 +354,11 @@ impl<'a,'b> Visitor<'a,'b> {
             use crate::ast::ty::TypeKind;
             match (&expr.data_ty.kind, &val_expr.data_ty.kind) {
             (ref t1, ref t2) if t1 == t2 => v,
-            (TypeKind::Named(_, Some(b1)),TypeKind::Named(_, Some(b2))) if b1 == b2 => v,
+            (TypeKind::Named(crate::ast::ty::TypePath::Resolved(b1)),TypeKind::Named(crate::ast::ty::TypePath::Resolved(b2))) if b1 == b2 => v,
             (TypeKind::Void, _) => Value::ImplicitUnit,
             (TypeKind::Pointer { .. },TypeKind::Pointer { .. }) => v,
             (TypeKind::Integer { .. },TypeKind::Integer { .. }) => v,   // TODO: Should this use an operation to truncate the value?
-            (TypeKind::Integer { .. },TypeKind::Named(_, Some(crate::ast::path::TypeBinding::ValueEnum(_)))) => v,
+            (TypeKind::Integer { .. },TypeKind::Named(crate::ast::ty::TypePath::Resolved(crate::ast::path::TypeBinding::ValueEnum(_)))) => v,
 
             // Array to pointer: Make a borrow
             (TypeKind::Pointer { is_const, .. }, TypeKind::UnsizedArray { .. }) => {

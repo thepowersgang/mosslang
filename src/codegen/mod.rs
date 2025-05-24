@@ -5,6 +5,7 @@ use crate::INDENT;
 use crate::ast::path::AbsolutePath;
 use ::std::collections::HashMap;
 
+mod type_info;
 mod ir;
 
 #[cfg(feature="cranelift")]
@@ -13,7 +14,8 @@ mod backend_cranelift;
 struct State<'a> {
     ofp: ::std::fs::File,
     constants: HashMap<AbsolutePath,&'a crate::ast::ExprRoot>,
-    fields: HashMap<AbsolutePath,HashMap<crate::Ident, usize>>,
+    fields: HashMap<AbsolutePath,HashMap<crate::Ident, (usize, crate::ast::Type)>>,
+    types_cache: ::std::cell::RefCell< ::std::collections::BTreeMap< crate::ast::Type, type_info::TypeInfoRef > >,
 }
 
 pub fn generate(output: &::std::path::Path, krate: crate::ast::Crate) -> Result<(),::std::io::Error>
@@ -22,6 +24,7 @@ pub fn generate(output: &::std::path::Path, krate: crate::ast::Crate) -> Result<
         ofp: ::std::fs::File::create(output)?,
         constants: Default::default(),
         fields: Default::default(),
+        types_cache: Default::default(),
     };
     fn enum_module<'a>(state: &mut State<'a>, module: &'a crate::ast::items::Module, path: AbsolutePath) {
         for item in &module.items {
@@ -31,11 +34,11 @@ pub fn generate(output: &::std::path::Path, krate: crate::ast::Crate) -> Result<
                 state.constants.insert(path.append(item.name.clone().unwrap()), &v.value);
             },
             ItemType::Struct(ref s) => {
-                let fields = s.fields.iter().enumerate().map(|(i,v)| (v.name.clone(), i)).collect();
-                state.fields.insert(
-                    path.append(item.name.as_ref().unwrap().clone()),
-                    fields
-                );
+                let ap = path.append(item.name.as_ref().unwrap().clone());
+                let fields = s.fields.iter().enumerate()
+                    .map(|(i,v)| (v.name.clone(), (i, v.ty.clone())))
+                    .collect();
+                state.fields.insert( ap.clone(), fields );
             },
             _ => {},
             }
@@ -44,6 +47,72 @@ pub fn generate(output: &::std::path::Path, krate: crate::ast::Crate) -> Result<
     enum_module(&mut state, &krate.module, AbsolutePath(Vec::new()));
     state.visit_module(&krate.module);
     Ok( () )
+}
+
+impl<'a> State<'a> {
+    fn type_info(&self, ty: &crate::ast::Type) -> type_info::TypeInfoRef {
+        use self::type_info::TypeInfo;
+        use crate::ast::ty::{TypeKind,IntClass};
+        
+        if let Some(v) = self.types_cache.borrow().get(ty) {
+            return v.clone();
+        }
+        // TODO: Handle infinite recursion by pushing to a stack and popping after `new` is created
+
+        let new = ::std::rc::Rc::new(match &ty.kind {
+            TypeKind::Infer { .. } => panic!("Found IVar during codegen? {:?}", ty),
+            TypeKind::TypeOf(..) => panic!("Found TypeOf during codegen? {:?}", ty),
+            TypeKind::Void => panic!("Type info for `void`?"),
+            TypeKind::Bool => TypeInfo::make_primitive(IntClass::Unsigned(0)),
+            TypeKind::Integer(int_class) => TypeInfo::make_primitive(int_class.clone()),
+            TypeKind::Tuple(items) => {
+                let mut repr_fields = Vec::with_capacity(items.len());
+                let mut size = 0;
+                let mut align = 0;
+                for ity in items {
+                    let i = self.type_info(ity);
+                    size += (i.align() - size % i.align()) % i.align();
+                    align = align.max(i.align());
+                    let o = size;
+                    size += i.size();
+                    repr_fields.push((o, i));
+                }
+                TypeInfo::make_composite(size, align, repr_fields)
+            },
+            TypeKind::Named(path) => {
+                let crate::ast::ty::TypePath::Resolved(type_binding) = path else { panic!("Unbound type during codegen. {:?}", ty); };
+                use crate::ast::path::TypeBinding;
+                match type_binding {
+                TypeBinding::Alias(_) => panic!("Unresolved type alias during codegen. {:?}", ty),
+                TypeBinding::EnumVariant(_, _) => panic!("Type resolved to EnumVariant, only valid in patterns"),
+                TypeBinding::Union(absolute_path) => todo!(),
+                TypeBinding::Struct(absolute_path) => {
+                    let Some(f) = self.fields.get(absolute_path) else { panic!("struct missing from fields map: {:?}", ty) };
+                    let mut fields: Vec<_> = f.values().collect();
+                    fields.sort();
+                    let mut repr_fields = Vec::with_capacity(fields.len());
+                    let mut size = 0;
+                    let mut align = 0;
+                    for (_, ity) in fields {
+                        let i = self.type_info(ity);
+                        size += (i.align() - size % i.align()) % i.align();
+                        align = align.max(i.align());
+                        let o = size;
+                        size += i.size();
+                        repr_fields.push((o, i));
+                    }
+                    TypeInfo::make_composite(size, align, repr_fields)
+                },
+                TypeBinding::ValueEnum(absolute_path) => todo!(),
+                TypeBinding::DataEnum(absolute_path) => todo!(),
+                }
+            },
+            TypeKind::Pointer { .. } => TypeInfo::make_primitive(IntClass::PtrInt),
+            TypeKind::Array { inner, count } => todo!(),
+            TypeKind::UnsizedArray(inner) => TypeInfo::make_array(0, self.type_info(inner)),
+            });
+        self.types_cache.borrow_mut().entry(ty.clone()).or_insert(new).clone()
+    }
 }
 
 impl<'a> State<'a> {

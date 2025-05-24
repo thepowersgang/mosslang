@@ -1,6 +1,6 @@
 use crate::INDENT;
 use crate::ast::path::AbsolutePath;
-use crate::ast::ty::{Type,TypeKind};
+use crate::ast::ty::Type;
 
 mod enumerate;
 mod ivars;
@@ -63,13 +63,7 @@ fn enumerate_mod(lc: &mut LookupContext, module: &crate::ast::items::Module, pat
         },
         ItemType::Enum(enm) => {
             let enm_path = path.append(v.name.as_ref().unwrap().clone());
-            let enm_ty = Type {
-                kind: TypeKind::Named(
-                    crate::ast::Path { root: crate::ast::path::Root::Root, components: enm_path.0.clone() },
-                    Some(crate::ast::path::TypeBinding::DataEnum(enm_path.clone()))
-                    ),
-                span: crate::Span::new_null()
-                };
+            let enm_ty = Type::new_path_resolved(crate::Span::new_null(), crate::ast::path::TypeBinding::DataEnum(enm_path.clone()));
             for variant in &enm.variants {
                 if let crate::ast::items::EnumVariantTy::Data(ty) = &variant.ty {
                     lc.functions.insert(
