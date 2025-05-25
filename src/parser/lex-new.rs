@@ -404,7 +404,7 @@ impl RawLexer
         else {
             // Check?
         }
-        Ok(Token::Literal(super::Literal::Integer( s[0] as _, Some(super::IntClass::U8) )))
+        Ok(Token::Literal(super::Literal::Integer( s[0] as _, Some(super::IntClass::I8) )))
     }
     /// Read escaped string data until an ending character
     fn get_token_string_inner(&mut self, end: char) -> ::std::io::Result<Vec<u8>> {

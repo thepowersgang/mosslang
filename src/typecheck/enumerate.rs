@@ -108,7 +108,7 @@ impl RuleEnumerate<'_, '_> {
         equate_types(span, &mut self.ivars, l, r);
     }
 
-    fn pattern_assign(&mut self, pattern: &crate::ast::Pattern, ty: &Type) {
+    pub fn pattern_assign(&mut self, pattern: &crate::ast::Pattern, ty: &Type) {
         println!("{INDENT}pattern_assign: {:?} = {:?}", pattern, ty);
         for b in &pattern.bindings {
             self.equate_types(&pattern.span, &self.local_tys[b.index.unwrap() as usize], ty);

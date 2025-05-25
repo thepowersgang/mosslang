@@ -688,7 +688,7 @@ impl<'a,'b> Visitor<'a,'b> {
         self.output.end_block(super::Terminator::Goto(bb_true))
 
     }
-    fn destructure_pattern(&mut self, pattern: &crate::ast::Pattern, value: super::Value) {
+    pub fn destructure_pattern(&mut self, pattern: &crate::ast::Pattern, value: super::Value) {
         use crate::ast::PatternTy;
         match &pattern.ty {
         PatternTy::Any => {},

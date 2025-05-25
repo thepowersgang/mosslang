@@ -19,12 +19,15 @@ pub(super) fn typecheck_expr(lc: &super::LookupContext, ret_ty: &crate::ast::Typ
     {
         let mut es = enumerate::IvarEnumerate::new(&mut ivars);
         expr.variables.reserve(expr.variable_count);
-        for (_, t) in args {
+        for (_, t) in args.iter_mut() {
             expr.variables.push(t.clone());
         }
         expr.variables.resize_with(expr.variable_count, || Type::new_infer(crate::Span::new_null()));
         for t in &mut expr.variables {
             es.fill_ivars_in(t);
+        }
+        for (pat, _) in args.iter_mut() {
+            crate::ast::ExprVisitor::visit_mut_pattern(&mut es, pat, false);
         }
         crate::ast::visit_mut_expr(&mut es, &mut expr.e);
     }
@@ -41,6 +44,9 @@ pub(super) fn typecheck_expr(lc: &super::LookupContext, ret_ty: &crate::ast::Typ
 
             loop_stack: Vec::new()
         };
+        for (pat, ty) in args.iter_mut() {
+            ss.pattern_assign(pat, ty);
+        }
         crate::ast::visit_mut_expr(&mut ss, &mut expr.e);
     }
 

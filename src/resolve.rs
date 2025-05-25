@@ -405,6 +405,8 @@ fn resolve_expr(item_scope: &ItemScope, expr: &mut crate::ast::ExprRoot, args: &
 {
     let _i = INDENT.inc("resolve_expr");
     let mut c = Context::new(item_scope);
+    // Reserve the non-destructured arguments (implicit first few locals)
+    c.next_index = args.len() as _;
     if ! args.is_empty() {
         c.layers.push(Default::default());
         for a in args {

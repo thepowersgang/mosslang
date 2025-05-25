@@ -215,9 +215,12 @@ pub struct Expr
     pub blocks: Vec<Block>,
 }
 
-pub fn from_expr(parent: &mut super::State, expr_root: &crate::ast::ExprRoot) -> Expr
+pub fn from_expr(parent: &mut super::State, expr_root: &crate::ast::ExprRoot, args: &[(crate::ast::Pattern, crate::ast::Type)]) -> Expr
 {
     let mut expr_visit = from_expr::Visitor::new(parent, &expr_root.variables);
+    for (i, (pat,_ty)) in args.iter().enumerate() {
+        expr_visit.destructure_pattern(pat, Value::Local(LocalIndex(i), WrapperList::default()));
+    }
     let ret_val = expr_visit.visit_expr(&expr_root.e);
     expr_visit.finish(ret_val)
 }
