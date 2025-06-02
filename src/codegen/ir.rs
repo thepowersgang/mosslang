@@ -1,16 +1,17 @@
-//! A simple IR like rust's MIR, to make codegen backend creation easier
+//! A high-level cfg-based IR
 //! 
-//! Slightly simpler than MIR, as it doesn't have the complex LValue setup - all lvalues are just pointers
+//! NOT SSA!
+//! 
+//! This is similar to mrustc's MIR but it doesn't have the complex LValue setup, using pointers instead.
 //!
 //! 
 //! Structure:
-//! - List of basic blocks
-// TODO: Should this be closer to LLVM IR (i.e. infinite register, with stack slots/alloca-s)
-// - Registers being integers, pointers, or floats
-// - For now: It's like mrustc's MIR - locals can be any type
+//! - Lowered expressions are a directed graph of "basic blocks"
+//! - Blocks end with a "terminator" that jumps to another block
+//! - Blocks contain "operations", that calculate or manipulate data
 use crate::ast::path::AbsolutePath;
 
-/// A read-only value reference
+/// A read-only value (generated, or a read from a slot)
 #[derive(Debug,Clone)]
 pub enum Value {
     /// Indicates that this value can never be constructed
@@ -21,7 +22,7 @@ pub enum Value {
     Local(LocalIndex, WrapperList),
     /// Value in a gloabl variable
     Named(AbsolutePath, WrapperList),
-    /// Deref a pointer and then apply wrappers
+    /// Dereference a pointer and then apply wrappers
     Deref { ptr: LocalIndex, wrappers: WrapperList },
     /// String literal
     StringLiteral(crate::ast::StringLiteral),
@@ -186,7 +187,7 @@ pub enum CmpOp {
 #[derive(Debug)]
 pub struct BlockIndex(pub usize);
 
-/// A local variable index
+/// A local variable/register index
 #[derive(Clone, Copy)]
 #[derive(Debug)]
 pub struct LocalIndex(pub usize);
@@ -204,27 +205,32 @@ pub struct Block
 #[derive(Debug)]
 pub struct Expr
 {
-    // TODO: Have different types of locals?
-    // - Integer Registers
-    // - Float Registers
-    // - Pointer Registers
-    // - Stack Slots
     pub locals: Vec<crate::ast::Type>,
 
     /// The list of basic blocks, block 0 is the entrypoint
     pub blocks: Vec<Block>,
 }
 
-pub fn from_expr(parent: &mut super::State, expr_root: &crate::ast::ExprRoot, args: &[(crate::ast::Pattern, crate::ast::Type)]) -> Expr
+impl Expr
 {
-    let mut expr_visit = from_expr::Visitor::new(parent, &expr_root.variables);
-    for (i, (pat,_ty)) in args.iter().enumerate() {
-        expr_visit.destructure_pattern(pat, Value::Local(LocalIndex(i), WrapperList::default()));
+    pub fn from_ast(parent: &mut super::State, expr_root: &crate::ast::ExprRoot, args: &[(crate::ast::Pattern, crate::ast::Type)]) -> Self {
+        from_expr::from_ast(parent, expr_root, args)
     }
-    let ret_val = expr_visit.visit_expr(&expr_root.e);
-    expr_visit.finish(ret_val)
 }
+
+pub struct SsaExpr(Expr);
+impl SsaExpr {
+    pub fn new(e: Expr) -> Self {
+        SsaExpr(ssa_ify::from_expr(e))
+    }
+    pub fn get(&self) -> &Expr {
+        &self.0
+    }
+}
+
 mod from_expr;
+mod ssa_ify;
+pub mod visit;
 
 mod dump;
 pub use self::dump::dump;

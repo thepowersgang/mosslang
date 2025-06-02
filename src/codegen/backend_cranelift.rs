@@ -37,18 +37,24 @@ impl Context
         builder.switch_to_block(blocks[0]);
         builder.seal_block(blocks[0]);
 
+        // NOTE: This needs to convert the non-SSA form into SSA
+        // - This can be done by determining which locals are borrowed or written twice
+        let alloca_override: Vec<_> = ir.locals.iter().map(|t| is_type_complex(t)).collect();
+
         for block in &ir.blocks {
 
             for stmt in &block.statements {
                 use super::ir::Operation;
                 match stmt {
-                Operation::AssignLocal(local_index, wrapper_list, value) => todo!(),
-                Operation::AssignNamed(absolute_path, value) => todo!(),
+                Operation::AssignLocal(local_index, value) => todo!(),
+                Operation::AssignDeref(local_index, value) => todo!(),
                 Operation::CreateComposite(local_index, absolute_path, values) => todo!(),
+                Operation::CreateDataVariant(local_index, absolute_path, _, values) => todo!(),
                 Operation::BinOp(local_index, value, bin_op, value1) => todo!(),
                 Operation::UniOp(local_index, uni_op, value) => todo!(),
                 Operation::BitShift(local_index, value, bit_shift, value1) => todo!(),
                 Operation::BorrowLocal(local_index, _, local_index1, wrapper_list) => todo!(),
+                Operation::BorrowGlobal(local_index, _, absolute_path, wrapper_list) => todo!(),
                 Operation::PointerOffset(local_index, _, local_index1, wrapper_list) => todo!(),
                 }
             }
@@ -62,6 +68,8 @@ impl Context
             Terminator::Compare(value, cmp_op, value1, block_index, block_index1) => todo!(),
             Terminator::CallPath(local_index, block_index, absolute_path, values) => todo!(),
             Terminator::Unreachable => todo!(),
+            Terminator::MatchEnum(value, _, block_index, block_index1) => todo!(),
+            Terminator::CallValue(local_index, block_index, local_index1, values) => todo!(),
             }
         }
     }
@@ -72,8 +80,9 @@ impl Context
         use crate::ast::ty::{TypeKind,IntClass};
         let ptr = t::I64;
         match &ty.kind {
-        TypeKind::Infer { ..  } => panic!("Unexpected infer type"),
-        TypeKind::Void => panic!("Unexpected void type"),
+        TypeKind::Infer { .. } | TypeKind::TypeOf(..) => panic!("Unexpanded {ty:?}"),
+        TypeKind::Void | TypeKind::UnsizedArray(..) => panic!("Unexpected {ty:?}"),
+
         TypeKind::Bool => dst.push(AbiParam::new(t::I8)),
         TypeKind::Integer(int_class) => dst.push(AbiParam::new(match int_class
             {
@@ -93,11 +102,54 @@ impl Context
                 self.to_abi_params(dst, ty);
             }
         },
-        TypeKind::Named(path, type_binding) => todo!(),
-        TypeKind::NullPointer => todo!(),
+        TypeKind::Named(path) => todo!(),
         TypeKind::Pointer { .. } => dst.push(AbiParam::new(ptr)),
         TypeKind::Array { inner, count } => todo!(),
         }
     }
 
+}
+
+
+/// Is the passed type too big (or complex) to store in a single cranelift register
+fn is_type_complex(t: &crate::ast::Type) -> bool {
+    use crate::ast::ty::TypeKind;
+    match &t.kind {
+    TypeKind::Infer { .. }|TypeKind::TypeOf(..) => panic!("Unexpected {:?}", t),
+
+    TypeKind::Void
+    |TypeKind::Bool
+    |TypeKind::Integer(..) => false,
+
+    TypeKind::Pointer { .. } => false,
+
+    TypeKind::Tuple(items) => {
+        match &items[..] {
+        [] => false,
+        [t] => is_type_complex(t),
+        _ => true,
+        }
+    },
+    TypeKind::Named(type_path) => {
+        use crate::ast::path::TypeBinding;
+        let crate::ast::ty::TypePath::Resolved(b) = type_path else { panic!("Unbound {:?}", t); };
+        match b {
+        TypeBinding::Alias(_) => panic!("Unresolved alias {:?}", t),
+        TypeBinding::EnumVariant(_, _) => todo!("Type bound to enum variant? {:?}", t),
+        TypeBinding::Union(absolute_path) => todo!(),
+        TypeBinding::Struct(absolute_path) => todo!(),
+        TypeBinding::ValueEnum(_) => false,
+        TypeBinding::DataEnum(_) => true,
+        }
+    },
+    TypeKind::Array { inner, count } => {
+        let &crate::ast::ty::ArraySize::Known(count) = count else { panic!("Unresolved type size: {:?}", t); };
+        match count {
+        0 => false,
+        1 => is_type_complex(inner),
+        _ => true,
+        }
+    },
+    TypeKind::UnsizedArray(_) => todo!(),
+    }
 }

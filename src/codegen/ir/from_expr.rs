@@ -11,8 +11,22 @@ struct Output {
     cur_block: usize,
     cur_block_stmts: Vec<super::Operation>,
 
-    local_types: Vec<crate::ast::Type>,
+    register_types: Vec<crate::ast::Type>,
     blocks: Vec<Option<super::Block>>,
+}
+
+pub fn from_ast(parent: &mut super::super::State, expr_root: &crate::ast::ExprRoot, args: &[(crate::ast::Pattern, crate::ast::Type)]) -> super::Expr {
+    let mut expr_visit = Visitor::new(parent, &expr_root.variables);
+
+    // First: Determine which locals are borrowed or mutated?
+
+    // Arguments
+    for (i, (pat,_ty)) in args.iter().enumerate() {
+        expr_visit.destructure_pattern(pat, super::Value::Local(super::LocalIndex(i), super::WrapperList::default()));
+    }
+
+    let ret_val = expr_visit.visit_expr(&expr_root.e);
+    expr_visit.finish(ret_val)
 }
 
 pub struct Visitor<'a,'b> {
@@ -27,7 +41,7 @@ impl<'a,'b> Visitor<'a,'b> {
             loop_stack: Vec::new(),
             output: Default::default(),
         };
-        rv.output.local_types = locals.iter().cloned().collect();
+        rv.output.register_types = locals.iter().cloned().collect();
         rv.output.blocks.push(None);    // We start with block #0 active
         rv
     }
@@ -37,7 +51,7 @@ impl<'a,'b> Visitor<'a,'b> {
         _ => self.output.end_block(super::Terminator::Return(tail_val)),
         }
         super::Expr {
-            locals: self.output.local_types,
+            locals: self.output.register_types,
             blocks: self.output.blocks.into_iter().map(|b| b.unwrap()).collect(),
         }
     }
@@ -744,8 +758,8 @@ impl Output {
         super::BlockIndex(i)
     }
     fn allocate_slot(&mut self, v: &crate::ast::Type) -> super::LocalIndex {
-        let i = self.local_types.len();
-        self.local_types.push(v.clone());
+        let i = self.register_types.len();
+        self.register_types.push(v.clone());
         super::LocalIndex(i)
     }
 

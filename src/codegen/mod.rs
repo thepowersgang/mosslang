@@ -137,7 +137,8 @@ impl<'a> State<'a> {
     fn emit_function(&mut self, name: &super::Ident, f: &crate::ast::items::Function) {
         let _i = INDENT.inc("emit_function");
         println!("{INDENT}emit_function: {name}");
-        let ir = ir::from_expr(self, &f.code, &f.sig.args);
+        let ir = ir::Expr::from_ast(self, &f.code, &f.sig.args);
+        let ir = ir::SsaExpr::new(ir);
 
         use ::std::io::Write;
         write!(self.ofp, "fn {name}( ").unwrap();
@@ -145,13 +146,13 @@ impl<'a> State<'a> {
             write!(self.ofp, "_{}: {}, ", i, ty).unwrap();
         }
         write!(self.ofp, ") {{\n").unwrap();
-        ir::dump(&mut IndentFile(&mut &self.ofp, true), &ir).unwrap();
+        ir::dump(&mut IndentFile(&mut &self.ofp, true), &ir.get()).unwrap();
         write!(self.ofp, "}}\n\n").unwrap();
     }
     fn emit_static(&mut self, name: &super::Ident, s: &crate::ast::items::Static) {
         let _i = INDENT.inc("emit_static");
         println!("{INDENT}emit_static: {name}");
-        let ir = ir::from_expr(self, &s.value, &[]);
+        let ir = ir::Expr::from_ast(self, &s.value, &[]);
         
         use ::std::io::Write;
         write!(self.ofp, "static {name}: _ = {{\n").unwrap();

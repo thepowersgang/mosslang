@@ -7,6 +7,9 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
+default = [
+    "cranelift",
+    ]
 cranelift = [ "dep:cranelift-frontend", "dep:cranelift-codegen", "dep:cranelift-module", "dep:cranelift-object" ]
 
 [profile.dev]
