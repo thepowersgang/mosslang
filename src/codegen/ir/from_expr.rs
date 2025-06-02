@@ -80,7 +80,7 @@ impl<'a,'b> Visitor<'a,'b> {
         },
         ExprKind::Continue => {
             let Some(l) = self.loop_stack.last() else { panic!("`continue` not in a loop") };
-            self.output.end_block(Terminator::Goto(l.head));
+            self.output.end_block(Terminator::Goto(l.head.into()));
 
             let b = self.output.new_block();
             self.output.start_block(b);
@@ -90,7 +90,7 @@ impl<'a,'b> Visitor<'a,'b> {
             let e = if let Some(expr) = expr { self.visit_expr(expr) } else { Value::ImplicitUnit };
             let Some(l) = self.loop_stack.last() else { panic!("`break` not in a loop") };
             self.output.push_stmt(Operation::AssignLocal(l.break_slot, e));
-            self.output.end_block(Terminator::Goto(l.exit));
+            self.output.end_block(Terminator::Goto(l.exit.into()));
 
             let b = self.output.new_block();
             self.output.start_block(b);
@@ -177,7 +177,7 @@ impl<'a,'b> Visitor<'a,'b> {
             ValueBinding::Local(i) => panic!("{}: Unexpected CallPath on a value - #{}", expr.span, i),
             ValueBinding::Function(absolute_path) => {
                 let next_block = self.output.new_block();
-                self.output.end_block(Terminator::CallPath(rv, next_block, absolute_path.clone(), a));
+                self.output.end_block(Terminator::CallPath { dst: rv, path: absolute_path.clone(), args: a, tgt: next_block.into() });
                 self.output.start_block(next_block);
             },
             ValueBinding::Static(absolute_path) => panic!("{}: Unexpected CallPath on a static - {}", expr.span, absolute_path),
@@ -204,7 +204,7 @@ impl<'a,'b> Visitor<'a,'b> {
                     {
                     crate::codegen::ir::FunctionPointerTy::Function => {
                         let next_block = self.output.new_block();
-                        self.output.end_block(Terminator::CallPath(rv, next_block, absolute_path, a));
+                        self.output.end_block(Terminator::CallPath { dst: rv, path: absolute_path, args: a, tgt: next_block.into() });
                         self.output.start_block(next_block);
                     },
                     crate::codegen::ir::FunctionPointerTy::Struct => {
@@ -224,7 +224,7 @@ impl<'a,'b> Visitor<'a,'b> {
                 }
                 };
             let next_block = self.output.new_block();
-            self.output.end_block(Terminator::CallValue(rv, next_block, fcn_local, a));
+            self.output.end_block(Terminator::CallValue { dst: rv, ptr: fcn_local, args: a, tgt: next_block.into() });
             self.output.start_block(next_block);
             Value::Local(rv, Default::default())
         },
@@ -429,15 +429,15 @@ impl<'a,'b> Visitor<'a,'b> {
                 let bb_true  = this.output.new_block();
                 let bb_false = this.output.new_block();
                 let bb_exit  = this.output.new_block();
-                this.output.end_block(Terminator::Compare(v_l, op, v_r, bb_true, bb_false));
+                this.output.end_block(Terminator::Compare { lhs: v_l, op, rhs: v_r, if_true: bb_true.into(), if_false: bb_false.into() });
             
                 this.output.start_block(bb_true);
                 this.output.push_stmt(Operation::AssignLocal(rv, Value::IntegerLiteral(1)));
-                this.output.end_block(Terminator::Goto(bb_exit));
+                this.output.end_block(Terminator::Goto(bb_exit.into()));
             
                 this.output.start_block(bb_false);
                 this.output.push_stmt(Operation::AssignLocal(rv, Value::IntegerLiteral(0)));
-                this.output.end_block(Terminator::Goto(bb_exit));
+                this.output.end_block(Terminator::Goto(bb_exit.into()));
 
                 this.output.start_block(bb_exit);
             }
@@ -482,11 +482,11 @@ impl<'a,'b> Visitor<'a,'b> {
                 
                 self.output.start_block(bb_true);
                 self.output.push_stmt(Operation::AssignLocal(rv, Value::IntegerLiteral(1)));
-                self.output.end_block(Terminator::Goto(bb_exit));
+                self.output.end_block(Terminator::Goto(bb_exit.into()));
                 
                 self.output.start_block(bb_false);
                 self.output.push_stmt(Operation::AssignLocal(rv, Value::IntegerLiteral(0)));
-                self.output.end_block(Terminator::Goto(bb_exit));
+                self.output.end_block(Terminator::Goto(bb_exit.into()));
 
                 self.output.start_block(bb_exit);
             },
@@ -503,10 +503,10 @@ impl<'a,'b> Visitor<'a,'b> {
                 exit: bb_exit,
                 break_slot,
             });
-            self.output.end_block(Terminator::Goto(bb_head));
+            self.output.end_block(Terminator::Goto(bb_head.into()));
             self.output.start_block(bb_head);
             self.visit_expr_block(body);
-            self.output.end_block(Terminator::Goto(bb_head));
+            self.output.end_block(Terminator::Goto(bb_head.into()));
             self.output.start_block(bb_exit);
             Value::Local( self.loop_stack.pop().unwrap().break_slot, Default::default() )
         },
@@ -517,7 +517,7 @@ impl<'a,'b> Visitor<'a,'b> {
             let bb_body = self.output.new_block();
             let bb_else = self.output.new_block();
             let bb_exit = self.output.new_block();
-            self.output.end_block(Terminator::Goto(bb_head));
+            self.output.end_block(Terminator::Goto(bb_head.into()));
             self.output.start_block(bb_head);
             self.apply_if(cond, bb_body, bb_else);
             
@@ -529,7 +529,7 @@ impl<'a,'b> Visitor<'a,'b> {
             
             self.output.start_block(bb_body);
             self.visit_expr_block(body);
-            self.output.end_block(Terminator::Goto(bb_head));
+            self.output.end_block(Terminator::Goto(bb_head.into()));
 
             self.output.start_block(bb_else);
             if let Some(else_block) = else_block {
@@ -538,7 +538,7 @@ impl<'a,'b> Visitor<'a,'b> {
             else {
                 self.output.push_stmt(Operation::AssignLocal(break_slot, Value::ImplicitUnit));
             }
-            self.output.end_block(Terminator::Goto(bb_exit));
+            self.output.end_block(Terminator::Goto(bb_exit.into()));
 
             self.output.start_block(bb_exit);
             Value::Local( break_slot, Default::default() )
@@ -561,20 +561,23 @@ impl<'a,'b> Visitor<'a,'b> {
             });
             
             self.output.push_stmt(Operation::AssignLocal(slot_it_value, start_value));
-            self.output.end_block(Terminator::Goto(bb_head));
+            self.output.end_block(Terminator::Goto(bb_head.into()));
 
             self.output.start_block(bb_head);
-            self.output.end_block(Terminator::Compare(Value::Local(slot_it_value, Default::default() ), super::CmpOp::Eq, end_value,  bb_else, bb_body));
+            self.output.end_block(Terminator::Compare {
+                lhs: Value::Local(slot_it_value, Default::default() ), op: super::CmpOp::Eq, rhs: end_value, 
+                if_true: bb_else.into(), if_false: bb_body.into()
+            });
 
             self.output.start_block(bb_body);
             self.destructure_pattern(pattern, Value::Local(slot_it_value, Default::default() ));
             self.visit_expr_block(body);
-            self.output.end_block(Terminator::Goto(bb_inc));
+            self.output.end_block(Terminator::Goto(bb_inc.into()));
 
             self.output.start_block(bb_inc);
             self.output.push_stmt(Operation::BinOp(slot_it_value, Value::Local(slot_it_value, Default::default() ), super::BinOp::Add, Value::IntegerLiteral(1)));
             
-            self.output.end_block(Terminator::Goto(bb_head));
+            self.output.end_block(Terminator::Goto(bb_head.into()));
             let break_slot = self.loop_stack.pop().unwrap().break_slot;
 
             self.output.start_block(bb_else);
@@ -584,7 +587,7 @@ impl<'a,'b> Visitor<'a,'b> {
             else {
                 self.output.push_stmt(Operation::AssignLocal(break_slot, Value::ImplicitUnit));
             }
-            self.output.end_block(Terminator::Goto(bb_exit));
+            self.output.end_block(Terminator::Goto(bb_exit.into()));
 
             self.output.start_block(bb_exit);
             Value::Local( break_slot, Default::default() )
@@ -600,7 +603,7 @@ impl<'a,'b> Visitor<'a,'b> {
                 self.output.start_block(bb_body);
                 let v = self.visit_expr_block(&b.body);
                 self.output.push_stmt(Operation::AssignLocal(res_slot, v));
-                self.output.end_block(Terminator::Goto(bb_exit));
+                self.output.end_block(Terminator::Goto(bb_exit.into()));
 
                 self.output.start_block(bb_next);
             }
@@ -611,7 +614,7 @@ impl<'a,'b> Visitor<'a,'b> {
                 Value::ImplicitUnit
             };
             self.output.push_stmt(Operation::AssignLocal(res_slot, ev));
-            self.output.end_block(Terminator::Goto(bb_exit));
+            self.output.end_block(Terminator::Goto(bb_exit.into()));
 
             self.output.start_block(bb_exit);
             Value::Local( res_slot, Default::default() )
@@ -633,7 +636,7 @@ impl<'a,'b> Visitor<'a,'b> {
                 self.destructure_pattern(&b.pat, value.clone());
                 let v = self.visit_expr(&b.val);
                 self.output.push_stmt(Operation::AssignLocal(res_slot, v));
-                self.output.end_block(Terminator::Goto(bb_exit));
+                self.output.end_block(Terminator::Goto(bb_exit.into()));
 
                 self.output.start_block(bb_next);
             }
@@ -681,12 +684,20 @@ impl<'a,'b> Visitor<'a,'b> {
             //ValueBinding::StructValue(_) => {},
             ValueBinding::Constant(absolute_path) => {
                 let cv = self.visit_expr( &self.parent.constants.get(absolute_path).expect("Missing constant?").e );
-                self.output.end_block(super::Terminator::Compare(value, super::CmpOp::Eq, cv,  bb_true, bb_false));
+                self.output.end_block(super::Terminator::Compare {
+                    lhs: value, op: super::CmpOp::Eq, rhs: cv,
+                    if_true: bb_true.into(),
+                    if_false: bb_false.into(),
+                });
                 return ;
             },
             ValueBinding::ValueEnumVariant(_, var_idx)|ValueBinding::DataEnumVariant(_, var_idx) => {
                 // Get the enum variant index
-                self.output.end_block(super::Terminator::MatchEnum(value, *var_idx,  bb_true, bb_false));
+                self.output.end_block(super::Terminator::MatchEnum {
+                    value, index: *var_idx,
+                    if_true: bb_true.into(),
+                    if_false: bb_false.into()
+                });
                 return ;
             },
             }
@@ -699,7 +710,7 @@ impl<'a,'b> Visitor<'a,'b> {
             }
             },
         }
-        self.output.end_block(super::Terminator::Goto(bb_true))
+        self.output.end_block(super::Terminator::Goto(bb_true.into()))
 
     }
     pub fn destructure_pattern(&mut self, pattern: &crate::ast::Pattern, value: super::Value) {
@@ -743,12 +754,15 @@ impl<'a,'b> Visitor<'a,'b> {
             if let Some(op) = op {
                 let v_l = self.visit_expr(e_l);
                 let v_r = self.visit_expr(e_r);
-                self.output.end_block(super::Terminator::Compare(v_l, op, v_r,  bb_true, bb_false));
+                self.output.end_block(super::Terminator::Compare { lhs: v_l, op, rhs: v_r,  if_true: bb_true.into(), if_false: bb_false.into() });
                 return ;
             }
         }
         let cond_v = self.visit_expr(expr);
-        self.output.end_block(super::Terminator::Compare(cond_v, super::CmpOp::Ne, super::Value::IntegerLiteral(0),  bb_true, bb_false));
+        self.output.end_block(super::Terminator::Compare {
+            lhs: cond_v, op: super::CmpOp::Ne, rhs: super::Value::IntegerLiteral(0),
+            if_true: bb_true.into(), if_false: bb_false.into(),
+        });
     }
 }
 impl Output {
@@ -782,6 +796,7 @@ impl Output {
         println!("{INDENT}end_block: {terminator:?}");
         assert!(self.cur_block != usize::MAX, "end_block with closed block");
         self.blocks[self.cur_block] = Some(super::Block {
+            args: Vec::new(),
             statements: ::std::mem::take(&mut self.cur_block_stmts),
             terminator,
         });

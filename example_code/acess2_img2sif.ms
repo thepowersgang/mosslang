@@ -3,7 +3,7 @@ type c_char = i8;
 
 // <sdl>
 extern {
-    fn IMG_Load(path: *const c_char) -> *mut SDL_Surface;
+    fn IMG_Load(path: *const [c_char; ...]) -> *mut SDL_Surface;
     fn SDL_FreeSurface(srf: *mut SDL_Surface);
     fn SDL_GetRGBA(v: u32, fmt: *const SDL_Format, r: *const u8, g: *const u8, b: *const u8, a: *const u8);
 }
@@ -30,15 +30,15 @@ type FILE = *mut sFILE;
 const NULL: *mut void = 0;
 extern {
     static stderr: FILE;
-	fn fopen(path: *const c_char, mode: *const c_char) -> FILE;
+	fn fopen(path: *const [c_char; ...], mode: *const [c_char; ...]) -> FILE;
 	fn fclose(file: FILE);
-	fn fprintf(file: FILE, s: *const c_char, ...) -> i32;
+	fn fprintf(file: FILE, s: *const [c_char; ...], ...) -> i32;
     fn fwrite(data: *const void, count: usize, size: usize, fp: FILE);
 
-	fn strcmp(s1: *const c_char, s2: *const c_char) -> i32;
+	fn strcmp(s1: *const [c_char; ...], s2: *const [c_char; ...]) -> i32;
 	fn memcmp(s1: *const void, s2: *const void, count: usize) -> i32;
 	fn memcpy(dst: *mut void, src: *const void, count: usize) -> *mut void;
-	fn perror(msg: *const c_char);
+	fn perror(msg: *const [c_char; ...]);
 
 	fn malloc(size: usize) -> *mut ();
 	fn free(ptr: *const void);
@@ -53,7 +53,7 @@ enum Compression {
 	Auto = 8,
 }
 
-extern "C" fn main(argc: usize, argv: *const *const c_char) -> i32 {
+extern "C" fn main(argc: usize, argv: *const [*const [c_char; ...]; ...]) -> i32 {
 
     let mut input_file = 0p as *const _;
     let mut output_file = 0p as *const _;

@@ -1,9 +1,22 @@
 
 /// Address in generated IR
 #[derive(Copy,Clone)]
+#[derive(Debug)]
+#[derive(PartialEq,Eq)]
 pub struct Addr {
     pub block_idx: super::BlockIndex,
     pub stmt_idx: usize,
+}
+impl ::std::fmt::Display for Addr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "BB{}/", self.block_idx.0)?;
+        if self.stmt_idx == !0 {
+            f.write_str("T")
+        }
+        else {
+            write!(f, "{}", self.stmt_idx)
+        }
+    }
 }
 
 pub trait Visitor {
@@ -100,29 +113,29 @@ where
 {
     use crate::codegen::ir::Terminator;
     match term {
+    Terminator::Unreachable => {},
     Terminator::Goto(_) => {},
     Terminator::Return(value) => visitor.reads_value(addr, value),
-    Terminator::Compare(value_l, _, value_r, _, _) => {
+    Terminator::Compare { lhs: value_l, rhs: value_r, .. } => {
         visitor.reads_value(addr, value_l);
         visitor.reads_value(addr, value_r);
     },
-    Terminator::MatchEnum(value, _, _, _) => {
+    Terminator::MatchEnum { value, .. } => {
         visitor.reads_value(addr, value);
     },
-    Terminator::CallPath(local_index_dst, _block_index, _absolute_path, values) => {
-        for v in values {
+    Terminator::CallPath { dst, path: _, args, tgt: _ } => {
+        for v in args {
             visitor.reads_value(addr, v);
         }
-        visitor.writes_slot(addr, local_index_dst);
-    }
-    Terminator::CallValue(local_index_dst, _block_index, local_index_val, values) => {
-        for v in values {
-            visitor.reads_value(addr, v);
-        }
-        visitor.reads_slot(addr, local_index_val);
-        visitor.writes_slot(addr, local_index_dst);
+        visitor.writes_slot(addr, dst);
     },
-    Terminator::Unreachable => {},
+    Terminator::CallValue { dst, ptr, args, tgt: _} => {
+        for v in args {
+            visitor.reads_value(addr, v);
+        }
+        visitor.reads_slot(addr, ptr);
+        visitor.writes_slot(addr, dst);
+    },
     }
 }
 
@@ -159,11 +172,50 @@ pub fn visit_value<V: ?Sized + Visitor>(visitor: &mut V, addr: Addr, v: &super::
     }
 }
 
+pub struct Route(Vec<usize>,RouteExit);
+impl Route {
+    /// Returns a tri-state: Yes, No, Looped
+    pub fn contains(&self, tgt_addr: &Addr) -> Option<bool> {
+        for &bb in self.0.iter() {
+            if bb == tgt_addr.block_idx.0 {
+                return Some(true)
+            }
+        }
+        match self.1 {
+        RouteExit::Stopped(addr) => Some(addr.block_idx.0 == tgt_addr.block_idx.0 && addr.stmt_idx >= tgt_addr.stmt_idx),
+        RouteExit::LoopedBlock(_) => None,
+        RouteExit::Return => Some(false),
+        }
+    }
 
+    /// Iterate over blocks entered in this route (doesn't include the starting block)
+    pub fn blocks(&self) -> impl Iterator<Item=usize> + '_ {
+        self.0.iter().copied()
+            .chain(match self.1 {
+                RouteExit::Stopped(addr) => Some(addr.block_idx.0),
+                RouteExit::LoopedBlock(b) => Some(b),
+                RouteExit::Return => None,
+            }.into_iter())
+    }
+}
+impl ::std::fmt::Debug for Route {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[")?;
+        for e in self.0.iter() {
+            write!(f, "{}->", e)?;
+        }
+        match self.1 {
+        RouteExit::Stopped(addr) => write!(f,"stop@{}", addr)?,
+        RouteExit::LoopedBlock(block) => write!(f, "loop{}", block)?,
+        RouteExit::Return => f.write_str("exit")?,
+        }
+        write!(f, "]")?;
+        Ok(())
+    }
+}
 #[derive(Copy,Clone)]
-pub enum RouteEntry {
-    /// Block's terminator reached
-    PassedBlock(usize),
+#[derive(Debug)]
+pub enum RouteExit {
     /// Explicit stop requested by callback
     Stopped(Addr),
     /// Reached the same block again, route calculation stopped
@@ -171,34 +223,52 @@ pub enum RouteEntry {
     /// A return terminator was seen
     Return,
 }
-pub fn enumerate_paths_from(ir: &super::Expr, addr: Addr, mut cb: impl FnMut(Vec<RouteEntry>)) {
+pub fn enumerate_paths_from(ir: &super::Expr, addr: Addr, stop: impl Fn(Addr)->bool, mut cb: impl FnMut(Route)) {
     let mut stack = Vec::new();
     stack.push(( addr.block_idx.0, Vec::new(), ));
     while let Some((idx,mut vals)) = stack.pop() {
-        if vals.iter().any(|v| match v { &RouteEntry::PassedBlock(other) if other == idx => true, _ => false }) {
-            vals.push(RouteEntry::LoopedBlock(idx));
-            cb(vals);
+        if vals.iter().any(|&other| other == idx) {
+            cb(Route(vals,RouteExit::LoopedBlock(idx)));
             continue
         }
-        vals.push(RouteEntry::PassedBlock(idx));
+        // Step through
+        fn check_exit(ir: &super::Expr, start: Addr, idx: usize, stop: &impl Fn(Addr)->bool) -> Option<Addr> {
+            for stmt_idx in (if idx == start.block_idx.0 { start.stmt_idx } else { 0 }) .. ir.blocks[idx].statements.len() {
+                let a = Addr { block_idx: super::BlockIndex(idx), stmt_idx };
+                if stop(a) {
+                    return Some(a);
+                }
+            }
+            if idx != start.block_idx.0 || start.stmt_idx != !0 {
+                let a = Addr { block_idx: super::BlockIndex(idx), stmt_idx: !0 };
+                if stop(a) {
+                    return Some(a);
+                }
+            }
+            None
+        }
+        if let Some(a) = check_exit(ir, addr, idx, &stop) {
+            cb(Route(vals, RouteExit::Stopped(a)));
+            continue
+        }
+        vals.push(idx);
         match &ir.blocks[idx].terminator {
-        |super::Terminator::CallPath(_, block_index, _, _)
-        |super::Terminator::CallValue(_, block_index, _, _)
-        |super::Terminator::Goto(block_index)
+        |super::Terminator::CallPath { tgt, .. }
+        |super::Terminator::CallValue { tgt, .. }
+        |super::Terminator::Goto(tgt)
          => {
-            stack.push((block_index.0, vals));
+            stack.push((tgt.index, vals));
         },
         |super::Terminator::Unreachable
         |super::Terminator::Return(_)
         => {
-            vals.push(RouteEntry::Return);
-            cb(vals)
+            cb(Route(vals, RouteExit::Return))
         },
-        |super::Terminator::Compare(_, _, _, block_true, block_false)
-        |super::Terminator::MatchEnum(_, _, block_true, block_false)
+        |super::Terminator::Compare { if_true, if_false, .. }
+        |super::Terminator::MatchEnum { if_true, if_false, .. }
         => {
-            stack.push((block_true.0, vals.clone()));
-            stack.push((block_false.0, vals));
+            stack.push((if_true.index, vals.clone()));
+            stack.push((if_false.index, vals));
         },
         }
     }

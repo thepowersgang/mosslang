@@ -297,7 +297,7 @@ fn check_revisit(ir: &mut IvarRules, lc: &super::LookupContext, ivars: &mut [sup
             //equate_types(&mut ivars, &Type::new_integer(crate::ast::ty::IntClass::PtrInt), index_ty);
             R::Consume
         }
-        _ => panic!("{span}: Type error: Index on unsupported type {:?}", get_ivar(&ivars, val_ty)),
+        _ => panic!("{span}Type error: Index on unsupported type {:?}", get_ivar(&ivars, val_ty)),
         }
         },
     Revisit::FieldNamed(ty, name) => {

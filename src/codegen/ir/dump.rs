@@ -59,25 +59,25 @@ pub fn dump(dst: &mut dyn ::std::io::Write, src: &super::Expr) -> ::std::io::Res
         }
         write!(dst, "}} ")?;
         match &block.terminator {
-        Terminator::Goto(block_index) => write!(dst, "goto {}", F(block_index))?,
+        Terminator::Goto(tgt) => write!(dst, "goto {}", F(tgt))?,
         Terminator::Return(value) => write!(dst, "return {}", F(value))?,
-        Terminator::Compare(value, cmp_op, value1, block_index, block_index1)
-            => write!(dst, "if {} {} {} {{ goto {} }} else {{ goto {} }}", F(value), F(cmp_op), F(value1), F(block_index), F(block_index1))?,
-        Terminator::MatchEnum(value, index, block_true, block_false)
-            => write!(dst, "if {} is #{} {{ goto {} }} else {{ goto {} }}", F(value), index, F(block_true), F(block_false))?,
-        Terminator::CallPath(local_index, block_index, absolute_path, values) => {
-            write!(dst, "{} = {}( ", F(local_index), absolute_path)?;
-            for a in values {
+        Terminator::Compare { lhs, op, rhs, if_true, if_false }
+            => write!(dst, "if {} {} {} {{ goto {} }} else {{ goto {} }}", F(lhs), F(op), F(rhs), F(if_true), F(if_false))?,
+        Terminator::MatchEnum { value, index, if_true, if_false }
+            => write!(dst, "if {} is #{} {{ goto {} }} else {{ goto {} }}", F(value), index, F(if_true), F(if_false))?,
+        Terminator::CallPath { dst: local_dst, path, args, tgt } => {
+            write!(dst, "{} = {}( ", F(local_dst), path)?;
+            for a in args {
                 write!(dst, "{}, ", F(a))?;
             }
-            write!(dst, ") goto {}", F(block_index))?;
+            write!(dst, ") goto {}", F(tgt))?;
         },
-        Terminator::CallValue(local_index, block_index, fcn_ptr, values) => {
-            write!(dst, "{} = ({})( ", F(local_index), F(fcn_ptr))?;
-            for a in values {
+        Terminator::CallValue{ dst: local_dst, ptr, args, tgt } => {
+            write!(dst, "{} = ({})( ", F(local_dst), F(ptr))?;
+            for a in args {
                 write!(dst, "{}, ", F(a))?;
             }
-            write!(dst, ") goto {}", F(block_index))?;
+            write!(dst, ") goto {}", F(tgt))?;
         },
         Terminator::Unreachable => write!(dst, " !")?,
         }
@@ -122,6 +122,19 @@ impl<'a> ::std::fmt::Display for F<'a, super::Value> {
 impl<'a> ::std::fmt::Display for F<'a, super::BlockIndex> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "bb{}", self.0 .0)
+    }
+}
+impl<'a> ::std::fmt::Display for F<'a, super::JumpTarget> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "bb{}", self.0.index)?;
+        if !self.0.args.is_empty() {
+            f.write_str("(")?;
+            for a in &self.0.args {
+                write!(f, "{},", F(a))?;
+            }
+            f.write_str(")")?;
+        }
+        Ok(())
     }
 }
 

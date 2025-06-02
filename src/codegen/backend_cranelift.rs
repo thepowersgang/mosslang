@@ -61,15 +61,15 @@ impl Context
 
             use super::ir::Terminator;
             match &block.terminator {
-            Terminator::Goto(block_index) => {
-                builder.ins().jump(blocks[block_index.0], &[]);
+            Terminator::Unreachable => todo!(),
+            Terminator::Goto(tgt) => {
+                builder.ins().jump(blocks[tgt.index], &[]);
             },
             Terminator::Return(value) => todo!(),
-            Terminator::Compare(value, cmp_op, value1, block_index, block_index1) => todo!(),
-            Terminator::CallPath(local_index, block_index, absolute_path, values) => todo!(),
-            Terminator::Unreachable => todo!(),
-            Terminator::MatchEnum(value, _, block_index, block_index1) => todo!(),
-            Terminator::CallValue(local_index, block_index, local_index1, values) => todo!(),
+            Terminator::Compare { lhs, op, rhs, if_true, if_false } => todo!(),
+            Terminator::CallPath { dst, tgt, path, args } => todo!(),
+            Terminator::MatchEnum { value, index, if_true, if_false  } => todo!(),
+            Terminator::CallValue { dst, tgt, ptr, args } => todo!(),
             }
         }
     }
@@ -80,8 +80,8 @@ impl Context
         use crate::ast::ty::{TypeKind,IntClass};
         let ptr = t::I64;
         match &ty.kind {
-        TypeKind::Infer { .. } | TypeKind::TypeOf(..) => panic!("Unexpanded {ty:?}"),
-        TypeKind::Void | TypeKind::UnsizedArray(..) => panic!("Unexpected {ty:?}"),
+        TypeKind::Infer { .. } | TypeKind::TypeOf(..) => panic!("Unexpanded {:?}", ty),
+        TypeKind::Void | TypeKind::UnsizedArray(..) => panic!("Unexpected {:?}", ty),
 
         TypeKind::Bool => dst.push(AbiParam::new(t::I8)),
         TypeKind::Integer(int_class) => dst.push(AbiParam::new(match int_class
