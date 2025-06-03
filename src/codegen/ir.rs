@@ -274,4 +274,6 @@ mod ssa_ify;
 pub mod visit;
 
 mod dump;
-pub use self::dump::dump;
+//pub use self::dump::dump;
+pub use self::dump::dump_fcn;
+pub use self::dump::dump_static;

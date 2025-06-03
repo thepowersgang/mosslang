@@ -76,13 +76,19 @@ pub fn from_expr(mut ir: super::Expr) -> super::Expr
             // Routes from writes already processed
             let mut other_write_routes: Vec<super::visit::Route> = Vec::new();
 
+            let mut remap_table = ::std::collections::BTreeMap::<super::visit::Addr,super::LocalIndex>::new();
+
+            if rs.writes.windows(2).any(|w| w[0].block_idx == w[1].block_idx) {
+                // Only want to keep the second, the first should just get a new local allocated and an entry added to the remap table
+                todo!("Handle multiple writes in one block");
+            }
+
             // Enumerate all paths from each write point
             // - Stop enumerating when another write or read position is seen
             // Find common blocks between the writes
             // - Tag that common block as being a merge point
             for w in rs.writes.iter() {
                 let path_count = other_write_routes.len();
-                // TODO: Check if there's another write in the same block, if there is then allocate a new local for the first one
 
                 // Enumerate all routes a write could take
                 super::visit::enumerate_paths_from(&ir, *w, |a| {
@@ -123,8 +129,6 @@ pub fn from_expr(mut ir: super::Expr) -> super::Expr
                 });
             }
 
-            let mut remap_table: Vec<Option<super::LocalIndex>> = (0 .. ir.blocks.len()).map(|_| None).collect();
-
             // Allocate a new local for every write, and one for all but one of the union/common blocks
             let mut remap_slot = Some(super::LocalIndex(slot));
             for block_idx in 0 .. ir.blocks.len() {
@@ -137,29 +141,38 @@ pub fn from_expr(mut ir: super::Expr) -> super::Expr
                         rv
                     });
                     ir.blocks[block_idx].args.push(v);
-                    remap_table[block_idx] = Some(v);
+                    remap_table.insert(super::visit::Addr { block_idx: super::BlockIndex(block_idx), stmt_idx: 0}, v);
                 }
             }
             for &w in &rs.writes {
                 let ty = ir.locals[slot].clone();
-                remap_table[w.block_idx.0] = Some(super::LocalIndex(ir.locals.len()));
+                remap_table.insert(w, super::LocalIndex(ir.locals.len()));
                 ir.locals.push(ty);
             }
             // Propagate entries in the remap table
             {
+                let mut exit_table: Vec<_> = (0 .. ir.blocks.len()).map(|_| None).collect();
+                for (a,v) in remap_table.iter() {
+                    // Since `remap_table` abvoe is a BTreeMap, it's sorted - so later remaps come first. This means that if we overwrite the `exit_table` entry it'll be correct
+                    exit_table[a.block_idx.0] = Some(*v);
+                }
                 let mut stack = Vec::new();
-                for (block_idx,local) in remap_table.iter().enumerate() {
+                // Prime the stack with the block exits
+                for (block_idx,local) in exit_table.iter().enumerate() {
                     if let Some(local) = local {
                         stack.push((block_idx, *local));
                     }
                 }
                 while let Some((block_idx, local)) = stack.pop() {
                     let mut set = |tgt: &mut super::JumpTarget| {
-                        if tgt.args.last() != Some(&local) {
+                        if common_blocks.is_set(tgt.index) && tgt.args.last() != Some(&local) {
                             tgt.args.push(local);
                         }
-                        if remap_table[tgt.index].is_none() {
-                            remap_table[tgt.index] = Some(local);
+                        else {
+                            remap_table.insert(super::visit::Addr { block_idx: super::BlockIndex(tgt.index), stmt_idx: 0}, local);
+                        }
+                        if exit_table[tgt.index].is_none() {
+                            exit_table[tgt.index] = Some(local);
                             stack.push((tgt.index, local));
                         }
                     };
@@ -180,17 +193,20 @@ pub fn from_expr(mut ir: super::Expr) -> super::Expr
             // Apply the remap table
             struct V {
                 slot: usize,
-                remap_table: Vec<Option<super::LocalIndex>>,
+                remap_table: ::std::collections::BTreeMap<super::visit::Addr,super::LocalIndex>,
             }
             impl VisitorMut for V {
                 fn writes_slot(&mut self, addr: super::visit::Addr, local_index: &mut super::LocalIndex) {
                     if local_index.0 == self.slot {
-                        *local_index = self.remap_table[addr.block_idx.0].unwrap();
+                        //*local_index = *self.remap_table.range(..=addr).last().unwrap().1
+                        *local_index = self.remap_table[&addr];
                     }   
                 }
                 fn reads_slot(&mut self, addr: super::visit::Addr, local_index: &mut super::LocalIndex) {
                     if local_index.0 == self.slot {
-                        *local_index = self.remap_table[addr.block_idx.0].unwrap();
+                        let n = *self.remap_table.range(..addr).last().unwrap().1;
+                        println!("{INDENT}reads_slot: @{addr} {local_index:?} -> {n:?}");
+                        *local_index = n;
                     }   
                 }
             }

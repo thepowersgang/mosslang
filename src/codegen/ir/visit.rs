@@ -288,17 +288,42 @@ pub fn visit_terminator_mut<V: ?Sized + VisitorMut>(visitor: &mut V, addr: Addr,
 
 /// Visit value reads in a list of field-access wrappers (indexing operations)
 pub fn visit_wrappers_mut<V: ?Sized + VisitorMut>(visitor: &mut V, addr: Addr, v: &mut super::WrapperList) {
-    for w in v.iter() {
-        match  w {
+    let mut reset = None;
+    for (i,w) in v.iter().enumerate() {
+        match w {
         super::Wrapper::Field(_) => {},
         super::Wrapper::IndexBySlot(local_index) => {
+            // NOTE: THis is a little hacky, avoids creating a new wrapper list until something changes
             let mut tmp = local_index;
             visitor.reads_slot(addr, &mut tmp);
+
             if tmp != local_index {
-                todo!("Update wrapper");
+                reset = Some((i, tmp));
+                break
             }
         },
         }
+    }
+
+    if let Some((i, tmp)) = reset {
+        let mut new = super::WrapperList::default();
+        let mut it = v.iter();
+        for _ in 0 .. i {
+            new.push( it.next().unwrap() );
+        }
+        new.push(super::Wrapper::IndexBySlot(tmp));
+        let _ = it.next().unwrap();
+        for w in it {
+            new.push(match w {
+            super::Wrapper::Field(_) => w,
+            super::Wrapper::IndexBySlot(mut local_index) => {
+                visitor.reads_slot(addr, &mut local_index);
+                super::Wrapper::IndexBySlot(local_index)
+            }
+            });
+        }
+
+        *v = new;
     }
 }
 /// Visit slot components of a value

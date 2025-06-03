@@ -13,6 +13,8 @@ mod backend_cranelift;
 
 struct State<'a> {
     ofp: ::std::fs::File,
+    ofp_bare_ir: ::std::fs::File,
+    ofp_ssa_ir: ::std::fs::File,
     constants: HashMap<AbsolutePath,&'a crate::ast::ExprRoot>,
     fields: HashMap<AbsolutePath,HashMap<crate::Ident, (usize, crate::ast::Type)>>,
     types_cache: ::std::cell::RefCell< ::std::collections::BTreeMap< crate::ast::Type, type_info::TypeInfoRef > >,
@@ -22,6 +24,8 @@ pub fn generate(output: &::std::path::Path, krate: crate::ast::Crate) -> Result<
 {
     let mut state = State {
         ofp: ::std::fs::File::create(output)?,
+        ofp_bare_ir: ::std::fs::File::create(output.with_extension(".moss_ir"))?,
+        ofp_ssa_ir: ::std::fs::File::create(output.with_extension(".moss_ssa"))?,
         constants: Default::default(),
         fields: Default::default(),
         types_cache: Default::default(),
@@ -139,88 +143,16 @@ impl<'a> State<'a> {
         println!("{INDENT}emit_function: {name}");
         let ir = ir::Expr::from_ast(self, &f.code, &f.sig.args);
 
-        use ::std::io::Write;
-        write!(self.ofp, "fn {name}( ").unwrap();
-        for (i,(_, ty)) in f.sig.args.iter().enumerate() {
-            write!(self.ofp, "_{}: {}, ", i, ty).unwrap();
-        }
-        write!(self.ofp, ") {{\n").unwrap();
-        ir::dump(&mut IndentFile(&mut &self.ofp, true), &ir).unwrap();
-        write!(self.ofp, "}}\n\n").unwrap();
+        ir::dump_fcn(&mut self.ofp_bare_ir, name, &f.sig, &ir);
 
-        let ir = ir::SsaExpr::new(ir);
+        let ssa_ir = ir::SsaExpr::new(ir);
+        ir::dump_fcn(&mut self.ofp_ssa_ir, name, &f.sig, ssa_ir.get());
     }
     fn emit_static(&mut self, name: &super::Ident, s: &crate::ast::items::Static) {
         let _i = INDENT.inc("emit_static");
         println!("{INDENT}emit_static: {name}");
         let ir = ir::Expr::from_ast(self, &s.value, &[]);
         
-        use ::std::io::Write;
-        write!(self.ofp, "static {name}: _ = {{\n").unwrap();
-        ir::dump(&mut IndentFile(&mut self.ofp, true), &ir).unwrap();
-        write!(self.ofp, "}};\n\n").unwrap();
-    }
-}
-
-struct IndentFile<F>(F, bool);
-impl<F> IndentFile<F>
-where
-    F: ::std::io::Write
-{
-    fn write_seg(&mut self, rv: &mut usize, buf: &[u8]) -> Option<std::io::Result<usize>> {
-        if ::std::mem::replace(&mut self.1, false) {
-            match self.0.write(b"    ") {
-            Err(e) => return Some(Err(e)),
-            Ok(_) => {},
-            }
-        }
-        match self.0.write(buf) {
-        Err(e) => return Some(Err(e)),
-        Ok(v) => {
-            *rv += v;
-            if v != buf.len() {
-                return Some(Ok(v))
-            }
-        }
-        }
-        None
-    }
-}
-impl<F> ::std::io::Write for IndentFile<F>
-where
-    F: ::std::io::Write
-{
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        let mut it = buf.split(|&v| v == b'\n');
-        let mut cur = it.next().unwrap();
-
-        let mut rv = 0;
-
-        for v in it {
-            if let Some(v) = self.write_seg(&mut rv, cur) {
-                return v;
-            }
-            if let Some(v) = self.write_seg(&mut rv, b"\n") {
-                return v;
-            }
-            // This is only reached if the buffer contained at least one newline
-            self.1 = true;
-            cur = v;
-        }
-
-        if cur.len() == 0 {
-            self.1 = true;
-        }
-        else {
-            if let Some(v) = self.write_seg(&mut rv, cur) {
-                return v;
-            }
-        }
-        assert!(rv <= buf.len());
-        Ok(rv)
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        self.0.flush()
+        ir::dump_static(&mut self.ofp_bare_ir, name, &s.ty, &ir);
     }
 }
