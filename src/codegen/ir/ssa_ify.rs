@@ -2,7 +2,8 @@
 //! 
 //! Same underlying representation, but uses `Operation::CreateSlot`
 use crate::INDENT;
-use super::Operation;
+use super::{Operation,Terminator};
+use super::visit::VisitorMut;
 
 pub fn from_expr(mut ir: super::Expr) -> super::Expr
 {
@@ -22,7 +23,8 @@ pub fn from_expr(mut ir: super::Expr) -> super::Expr
                     local_index_dst
                 },
 
-                Operation::AssignLocal(local_index, _)
+                |Operation::Alloca { dst: local_index, .. }
+                |Operation::AssignLocal(local_index, _)
                 |Operation::CreateComposite(local_index, _, _)
                 |Operation::CreateDataVariant(local_index, _, _, _)
                 |Operation::BinOp(local_index, _, _, _) 
@@ -121,127 +123,145 @@ pub fn from_expr(mut ir: super::Expr) -> super::Expr
                 });
             }
 
-            // TODO: If there's multiple common blocks, then this logic gets harder
-            assert!( (0 .. ir.blocks.len()).map(|v| common_blocks.is_set(v)).count() <= 1 );
+            let mut remap_table: Vec<Option<super::LocalIndex>> = (0 .. ir.blocks.len()).map(|_| None).collect();
 
             // Allocate a new local for every write, and one for all but one of the union/common blocks
+            let mut remap_slot = Some(super::LocalIndex(slot));
             for block_idx in 0 .. ir.blocks.len() {
                 if common_blocks.is_set(block_idx) {
                     // Add an argument (TODO: Different index if there's multiple common blocks)
-                    ir.blocks[block_idx].args.push(super::LocalIndex(slot));
+                    let v = remap_slot.take().unwrap_or_else(|| {
+                        let ty = ir.locals[slot].clone();
+                        let rv = super::LocalIndex(ir.locals.len());
+                        ir.locals.push(ty);
+                        rv
+                    });
+                    ir.blocks[block_idx].args.push(v);
+                    remap_table[block_idx] = Some(v);
                 }
             }
-            todo!("Multi-write #{}", slot);
+            for &w in &rs.writes {
+                let ty = ir.locals[slot].clone();
+                remap_table[w.block_idx.0] = Some(super::LocalIndex(ir.locals.len()));
+                ir.locals.push(ty);
+            }
+            // Propagate entries in the remap table
+            {
+                let mut stack = Vec::new();
+                for (block_idx,local) in remap_table.iter().enumerate() {
+                    if let Some(local) = local {
+                        stack.push((block_idx, *local));
+                    }
+                }
+                while let Some((block_idx, local)) = stack.pop() {
+                    let mut set = |tgt: &mut super::JumpTarget| {
+                        if tgt.args.last() != Some(&local) {
+                            tgt.args.push(local);
+                        }
+                        if remap_table[tgt.index].is_none() {
+                            remap_table[tgt.index] = Some(local);
+                            stack.push((tgt.index, local));
+                        }
+                    };
+                    match &mut ir.blocks[block_idx].terminator {
+                    Terminator::Unreachable => {}
+                    Terminator::Return(_) => {}
+                    Terminator::Goto(tgt)
+                    |Terminator::CallPath { tgt, .. }
+                    |Terminator::CallValue { tgt, .. } => set(tgt),
+                    Terminator::Compare { if_true, if_false, .. }
+                    |Terminator::MatchEnum { if_true, if_false, .. } => {
+                        set(if_true);
+                        set(if_false);
+                    },
+                    }
+                }
+            }
+            // Apply the remap table
+            struct V {
+                slot: usize,
+                remap_table: Vec<Option<super::LocalIndex>>,
+            }
+            impl VisitorMut for V {
+                fn writes_slot(&mut self, addr: super::visit::Addr, local_index: &mut super::LocalIndex) {
+                    if local_index.0 == self.slot {
+                        *local_index = self.remap_table[addr.block_idx.0].unwrap();
+                    }   
+                }
+                fn reads_slot(&mut self, addr: super::visit::Addr, local_index: &mut super::LocalIndex) {
+                    if local_index.0 == self.slot {
+                        *local_index = self.remap_table[addr.block_idx.0].unwrap();
+                    }   
+                }
+            }
+            super::visit::visit_expr_mut(&mut V { slot, remap_table }, &mut ir);
         }
     }
 
     // For borrowed, inject an Alloca at start of function
     let mut alloca_needed = BitSet::new(ir.locals.len());
+    let mut new_ops = Vec::new();
     for slot in 0 .. ir.locals.len() {
         if borrowed.is_set(slot) {
             alloca_needed.set(slot);
+            new_ops.push(super::Operation::Alloca { dst: super::LocalIndex(slot), ty: ir.locals[slot].clone() });
         }
     }
     
-    for block in ir.blocks.iter_mut() {
-        for stmt in block.statements.iter_mut() {
-            fn update_write(alloca_needed: &BitSet, local_index: &mut super::LocalIndex) {
-                if alloca_needed.is_set(local_index.0) {
-                    todo!("update_write: Add a `_I = _new` after this statement");
-                }
+    for (block_idx,block) in ir.blocks.iter_mut().enumerate() {
+        for (stmt_idx,stmt) in block.statements.iter_mut().enumerate() {
+            struct V<'a> {
+                alloca_needed: &'a BitSet,
             }
-            fn update_use(alloca_needed: &BitSet, local_index: &mut super::LocalIndex) {
-                if alloca_needed.is_set(local_index.0) {
-                    todo!("update_use: Add a `_new = _I` before this statement");
+            impl VisitorMut for V<'_> {
+                fn writes_slot(&mut self, _: super::visit::Addr, local_index: &mut super::LocalIndex) {
+                    if self.alloca_needed.is_set(local_index.0) {
+                        todo!("update_write: Add a `_I = _new` after this statement");
+                    }   
                 }
-            }
-            fn update_wrappers(alloca_needed: &BitSet, wrapper_list: &mut super::WrapperList) {
-                for w in wrapper_list.iter() {
-                    match w {
-                    super::Wrapper::IndexBySlot(mut s) if alloca_needed.is_set(s.0) => {
-                        update_use(alloca_needed, &mut s);
-                        todo!()
-                    },
-                    _ => {},
-                    }
+                fn reads_slot(&mut self, _: super::visit::Addr, local_index: &mut super::LocalIndex) {
+                    if self.alloca_needed.is_set(local_index.0) {
+                        todo!("update_use: Add a `_new = _I` before this statement");
+                    }   
                 }
-            }
-            fn update_value(alloca_needed: &BitSet, value: &mut super::Value) {
-                use crate::codegen::ir::Value;
-                match value {
-                Value::Unreachable => {},
-                Value::ImplicitUnit => {},
-                Value::StringLiteral(_) => {},
-                Value::IntegerLiteral(_) => {},
-                Value::FunctionPointer(_, _) => {},
 
-                Value::Local(local_index, wrapper_list) => {
-                    update_wrappers(alloca_needed, wrapper_list);
-                    if alloca_needed.is_set(local_index.0) {
-                        *value = Value::Deref { ptr: *local_index, wrappers: ::std::mem::take(wrapper_list) };
+                fn reads_value(&mut self, addr: super::visit::Addr, value: &mut super::Value) {
+                    use crate::codegen::ir::Value;
+                    match value {
+                    Value::Local(local_index, wrapper_list) => {
+                        self.reads_wrappers(addr, wrapper_list);
+                        if self.alloca_needed.is_set(local_index.0) {
+                            *value = Value::Deref { ptr: *local_index, wrappers: ::std::mem::take(wrapper_list) };
+                        }
+                    },
+                    _ => super::visit::visit_value_mut(self, addr, value),
                     }
-                },
-                Value::Named(_, wrapper_list) => {
-                    update_wrappers(alloca_needed, wrapper_list);
-                },
-                Value::Deref { ptr, wrappers } => {
-                    update_wrappers(alloca_needed, wrappers);
-                    update_use(alloca_needed, ptr);
-                },
                 }
             }
+            let addr = super::visit::Addr { block_idx: super::BlockIndex(block_idx), stmt_idx };
+            let mut v = V { alloca_needed: &alloca_needed };
             match stmt {
             Operation::AssignLocal(local_index, value) => {
-                update_value(&alloca_needed, value);
+                v.reads_value(addr, value);
                 if alloca_needed.is_set(local_index.0) {
                     *stmt = Operation::AssignDeref(*local_index, ::std::mem::replace(value, super::Value::Unreachable));
                 }
             },
-            Operation::AssignDeref(local_index, value) => {
-                update_use(&alloca_needed, local_index);
-                update_value(&alloca_needed, value);
-            }
-            Operation::CreateComposite(local_index, _, values) => {
-                update_use(&alloca_needed, local_index);
-                for value in values {
-                    update_value(&alloca_needed, value);
-                }
-            }
-            Operation::CreateDataVariant(local_index, _, _, values) => {
-                update_use(&alloca_needed, local_index);
-                for value in values {
-                    update_value(&alloca_needed, value);
-                }
-            }
-            Operation::BinOp(local_index_dst, value_l, _, value_r)
-            |Operation::BitShift(local_index_dst, value_l, _, value_r) => {
-                update_write(&alloca_needed, local_index_dst);
-                update_value(&alloca_needed, value_l);
-                update_value(&alloca_needed, value_r);
-            }
-            Operation::UniOp(local_index_dst, _, value) => {
-                update_write(&alloca_needed, local_index_dst);
-                update_value(&alloca_needed, value);
-            }
             Operation::BorrowLocal(local_index_dst, flag, local_index_src, wrapper_list) => {
-                update_write(&alloca_needed, local_index_dst);
-                update_wrappers(&alloca_needed, wrapper_list);
+                v.writes_slot(addr, local_index_dst);
+                v.reads_wrappers(addr, wrapper_list);
                 if alloca_needed.is_set(local_index_src.0) {
                     *stmt = Operation::PointerOffset(*local_index_dst, *flag, *local_index_src, ::std::mem::take(wrapper_list));
                 }
-            }
-            Operation::BorrowGlobal(local_index_dst, _, _, wrapper_list) => {
-                update_write(&alloca_needed, local_index_dst);
-                update_wrappers(&alloca_needed, wrapper_list);
             },
-            Operation::PointerOffset(local_index_dst, _flag, local_index_base, wrapper_list) => {
-                update_write(&alloca_needed, local_index_dst);
-                update_use(&alloca_needed, local_index_base);
-                update_wrappers(&alloca_needed, wrapper_list);
-            }
+            _ => {
+                super::visit::visit_operation_mut(&mut v, addr, stmt);
+            },
             }
         }
     }
+    new_ops.append(&mut ir.blocks[0].statements);
+    ir.blocks[0].statements = new_ops;
 
     ir
 }

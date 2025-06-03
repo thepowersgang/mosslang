@@ -46,6 +46,7 @@ impl Context
             for stmt in &block.statements {
                 use super::ir::Operation;
                 match stmt {
+                Operation::Alloca { dst, ty } => todo!(),
                 Operation::AssignLocal(local_index, value) => todo!(),
                 Operation::AssignDeref(local_index, value) => todo!(),
                 Operation::CreateComposite(local_index, absolute_path, values) => todo!(),

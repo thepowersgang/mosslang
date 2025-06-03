@@ -114,6 +114,10 @@ pub(super) enum Wrapper {
 /// Most of these are just assignments
 #[derive(Debug)]
 pub enum Operation {
+    Alloca {
+        dst: LocalIndex,
+        ty: crate::ast::Type,
+    },
     /// Assign a value to a local variable
     AssignLocal(LocalIndex, Value),
     /// Assign a value to a dereference of a pointer (in a local variable)
@@ -217,6 +221,7 @@ pub enum CmpOp {
 #[derive(Clone, Copy)]
 #[derive(Debug)]
 #[derive(PartialEq,Eq)]
+#[derive(PartialOrd,Ord)]
 pub struct BlockIndex(pub usize);
 
 /// A local variable/register index

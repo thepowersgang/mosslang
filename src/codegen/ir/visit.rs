@@ -3,6 +3,7 @@
 #[derive(Copy,Clone)]
 #[derive(Debug)]
 #[derive(PartialEq,Eq)]
+#[derive(PartialOrd,Ord)]
 pub struct Addr {
     pub block_idx: super::BlockIndex,
     pub stmt_idx: usize,
@@ -67,6 +68,7 @@ where
 {
     use super::Operation;
     match op {
+    Operation::Alloca { dst, ty: _ } => visitor.writes_slot(addr, dst),
     Operation::AssignDeref(ptr, v) => {
         visitor.reads_slot(addr, ptr);
         visitor.reads_value(addr, v);
@@ -150,6 +152,157 @@ pub fn visit_wrapper<V: ?Sized + Visitor>(visitor: &mut V, addr: Addr, v: &super
 }
 /// Visit slot components of a value
 pub fn visit_value<V: ?Sized + Visitor>(visitor: &mut V, addr: Addr, v: &super::Value) {
+    use crate::codegen::ir::Value;
+    match v {
+    Value::Unreachable => {},
+    Value::ImplicitUnit => {},
+    Value::StringLiteral(_) => {},
+    Value::IntegerLiteral(_) => {},
+    Value::FunctionPointer(_,_) => {},
+
+    Value::Local(local_index, wrapper_list) => {
+        visitor.reads_slot(addr, local_index);
+        visitor.reads_wrappers(addr, wrapper_list);
+    },
+    Value::Named(_, wrapper_list) => {
+        visitor.reads_wrappers(addr, wrapper_list);
+    },
+    Value::Deref { ptr, wrappers } => {
+        visitor.reads_slot(addr, ptr);
+        visitor.reads_wrappers(addr, wrappers);
+    },
+    }
+}
+
+pub trait VisitorMut {
+    fn block(&mut self, idx: super::BlockIndex, b: &mut super::Block) {
+        visit_block_mut(self, idx, b);
+    }
+    fn operation(&mut self, addr: Addr, op: &mut super::Operation) {
+        visit_operation_mut(self, addr, op);
+    }
+    fn terminator(&mut self, addr: Addr, term: &mut super::Terminator) {
+        visit_terminator_mut(self, addr, term);
+    }
+    
+    fn writes_slot(&mut self, addr: Addr, local_index: &mut super::LocalIndex) {
+        let _ = (addr, local_index);
+    }
+    fn reads_slot(&mut self, addr: Addr, local_index: &mut super::LocalIndex) {
+        let _ = (addr, local_index);
+    }
+    fn reads_wrappers(&mut self, addr: Addr, v: &mut super::WrapperList) {
+        visit_wrappers_mut(self, addr, v)
+    }
+    fn reads_value(&mut self, addr: Addr, v: &mut super::Value) {
+        visit_value_mut(self, addr, v)
+    }
+}
+pub fn visit_expr_mut<V: ?Sized + VisitorMut>(v: &mut V, ir: &mut super::Expr)
+{
+    for (block_idx,block) in ir.blocks.iter_mut().enumerate() {
+        v.block(super::BlockIndex(block_idx), block)
+    }
+}
+pub fn visit_block_mut<V: ?Sized + VisitorMut>(visitor: &mut V, block_idx: super::BlockIndex, b: &mut super::Block)
+{
+    for (stmt_idx,op) in b.statements.iter_mut().enumerate() {
+        visitor.operation(Addr { block_idx, stmt_idx }, op);
+    }
+    visitor.terminator(Addr { block_idx, stmt_idx: !0 }, &mut b.terminator);
+}
+pub fn visit_operation_mut<V: ?Sized + VisitorMut,>(visitor: &mut V, addr: Addr, op: &mut super::Operation)
+{
+    use super::Operation;
+    match op {
+    Operation::Alloca { dst, ty: _ } => visitor.writes_slot(addr, dst),
+    Operation::AssignDeref(ptr, v) => {
+        visitor.reads_slot(addr, ptr);
+        visitor.reads_value(addr, v);
+    },
+    Operation::BorrowLocal(local_index_dst, _is_mut, local_index_src, wrappers) => {
+        visitor.reads_slot(addr, local_index_src); // Shouldn't matter, as we ignore borrowed locals
+        visitor.reads_wrappers(addr, wrappers);
+        visitor.writes_slot(addr, local_index_dst);
+    },
+
+    Operation::AssignLocal(local_index, v)
+    |Operation::UniOp(local_index, _, v) => {
+        visitor.reads_value(addr, v);
+        visitor.writes_slot(addr, local_index);
+    },
+    Operation::CreateComposite(local_index, _, values)
+    |Operation::CreateDataVariant(local_index, _, _, values) => {
+        for v in values {
+            visitor.reads_value(addr, v);
+        }
+        visitor.writes_slot(addr, local_index);
+    },
+    Operation::BinOp(local_index, vl, _, vr)
+    |Operation::BitShift(local_index, vl, _, vr) => {
+        visitor.reads_value(addr, vl);
+        visitor.reads_value(addr, vr);
+        visitor.writes_slot(addr, local_index);
+    },
+    Operation::BorrowGlobal(local_index, _, _, wrappers) => {
+        visitor.reads_wrappers(addr, wrappers);
+        visitor.writes_slot(addr, local_index);
+    },
+    Operation::PointerOffset(local_index, _, ptr, wrappers) => {
+        visitor.reads_slot(addr, ptr);
+        visitor.reads_wrappers(addr, wrappers);
+        visitor.writes_slot(addr, local_index);
+    },
+    }
+}
+
+pub fn visit_terminator_mut<V: ?Sized + VisitorMut>(visitor: &mut V, addr: Addr, term: &mut super::Terminator)
+{
+    use crate::codegen::ir::Terminator;
+    match term {
+    Terminator::Unreachable => {},
+    Terminator::Goto(_) => {},
+    Terminator::Return(value) => visitor.reads_value(addr, value),
+    Terminator::Compare { lhs: value_l, rhs: value_r, .. } => {
+        visitor.reads_value(addr, value_l);
+        visitor.reads_value(addr, value_r);
+    },
+    Terminator::MatchEnum { value, .. } => {
+        visitor.reads_value(addr, value);
+    },
+    Terminator::CallPath { dst, path: _, args, tgt: _ } => {
+        for v in args {
+            visitor.reads_value(addr, v);
+        }
+        visitor.writes_slot(addr, dst);
+    },
+    Terminator::CallValue { dst, ptr, args, tgt: _} => {
+        for v in args {
+            visitor.reads_value(addr, v);
+        }
+        visitor.reads_slot(addr, ptr);
+        visitor.writes_slot(addr, dst);
+    },
+    }
+}
+
+/// Visit value reads in a list of field-access wrappers (indexing operations)
+pub fn visit_wrappers_mut<V: ?Sized + VisitorMut>(visitor: &mut V, addr: Addr, v: &mut super::WrapperList) {
+    for w in v.iter() {
+        match  w {
+        super::Wrapper::Field(_) => {},
+        super::Wrapper::IndexBySlot(local_index) => {
+            let mut tmp = local_index;
+            visitor.reads_slot(addr, &mut tmp);
+            if tmp != local_index {
+                todo!("Update wrapper");
+            }
+        },
+        }
+    }
+}
+/// Visit slot components of a value
+pub fn visit_value_mut<V: ?Sized + VisitorMut>(visitor: &mut V, addr: Addr, v: &mut super::Value) {
     use crate::codegen::ir::Value;
     match v {
     Value::Unreachable => {},

@@ -11,6 +11,8 @@ pub fn dump(dst: &mut dyn ::std::io::Write, src: &super::Expr) -> ::std::io::Res
         for stmt in &block.statements {
             write!(dst, "    ")?;
             match stmt {
+            Operation::Alloca { dst: l, ty }
+                => write!(dst, "{} = alloca {}", F(l), ty)?,
             Operation::AssignLocal(local_index, value)
                 => write!(dst, "{} = {}", F(local_index), F(value))?,
             Operation::AssignDeref(local_index, value)
