@@ -191,10 +191,11 @@ pub fn visit_mut_block(c: &mut dyn ExprVisitor, block: &mut crate::ast::expr::Bl
         match s {
         crate::ast::expr::Statement::Expr(e) => c.visit_mut_expr(e),
         crate::ast::expr::Statement::Let(pattern, _, expr) => {
-            c.visit_mut_pattern(pattern, false);
             if let Some(expr) = expr {
                 c.visit_mut_expr(expr);
             }
+            // Visit _after_ the expression, due to evaluation order
+            c.visit_mut_pattern(pattern, false);
         },
         }
     }

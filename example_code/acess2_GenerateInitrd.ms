@@ -371,7 +371,7 @@ fn expand_path(out: *mut c_STR, src: *const c_STR) -> usize {
 }
 /// Return a version of a name mangled such that it's a valid `ld` symbol
 fn ld_mangle(out: *mut c_STR, src: *const c_STR) -> usize {
-	let src: *const c_char = src;
+	let src: *const c_char = src as _;
 	let rv = 0;
 	while *src != 0 {
 		/*match *src {
