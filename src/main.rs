@@ -7,6 +7,7 @@ mod expand;
 mod typecheck;
 mod resolve;
 mod codegen;
+mod helpers;
 
 #[derive(::gumdrop::Options)]
 struct Options

@@ -2,6 +2,7 @@
 //! 
 //! Same underlying representation, but uses `Operation::CreateSlot`
 use crate::INDENT;
+use crate::helpers::BitSet;
 use super::{Operation,Terminator};
 use super::visit::VisitorMut;
 
@@ -306,29 +307,7 @@ pub fn from_expr(mut ir: super::Expr) -> super::Expr
     new_ops.append(&mut ir.blocks[0].statements);
     ir.blocks[0].statements = new_ops;
 
-    ir
-}
+    super::verify::check_ssa(&ir);
 
-/// Quick bitset implementation
-struct BitSet {
-    v: Vec<u32>,
-}
-impl BitSet {
-    fn new(count: usize) -> Self {
-        BitSet { v: vec![0; (count + 31) / 32] }
-    }
-    fn is_set(&self, slot: usize) -> bool {
-        if slot >= self.v.len() * 32 {
-            false
-        }
-        else {
-            self.v[slot / 32] & (1 << (slot % 32)) != 0
-        }
-    }
-    /// Returns the previous state of the entry
-    fn set(&mut self, slot: usize) -> bool {
-        let rv = self.is_set(slot);
-        self.v[slot / 32] |= 1 << (slot % 32);
-        rv
-    }
+    ir
 }

@@ -273,6 +273,8 @@ mod from_expr;
 mod ssa_ify;
 pub mod visit;
 
+pub mod verify;
+
 mod dump;
 //pub use self::dump::dump;
 pub use self::dump::dump_fcn;
