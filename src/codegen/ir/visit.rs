@@ -411,7 +411,7 @@ pub fn enumerate_paths_from(ir: &super::Expr, addr: Addr, stop: impl Fn(Addr)->b
         }
         // Step through
         fn check_exit(ir: &super::Expr, start: Addr, idx: usize, stop: &impl Fn(Addr)->bool) -> Option<Addr> {
-            for stmt_idx in (if idx == start.block_idx.0 { start.stmt_idx } else { 0 }) .. ir.blocks[idx].statements.len() {
+            for stmt_idx in (if idx == start.block_idx.0 { start.stmt_idx.saturating_add(1) } else { 0 }) .. ir.blocks[idx].statements.len() {
                 let a = Addr { block_idx: super::BlockIndex(idx), stmt_idx };
                 if stop(a) {
                     return Some(a);

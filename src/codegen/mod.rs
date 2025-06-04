@@ -145,7 +145,10 @@ impl<'a> State<'a> {
 
         ir::dump_fcn(&mut self.ofp_bare_ir, name, &f.sig, &ir);
 
-        let ssa_ir = ir::SsaExpr::new(ir);
+        let ssa_ir = {
+            println!("{INDENT}emit_function: SSA {name}");
+            ir::SsaExpr::new(ir)
+        };
         ir::dump_fcn(&mut self.ofp_ssa_ir, name, &f.sig, ssa_ir.get());
     }
     fn emit_static(&mut self, name: &super::Ident, s: &crate::ast::items::Static) {
@@ -154,5 +157,11 @@ impl<'a> State<'a> {
         let ir = ir::Expr::from_ast(self, &s.value, &[]);
         
         ir::dump_static(&mut self.ofp_bare_ir, name, &s.ty, &ir);
+        
+        let ssa_ir = {
+            println!("{INDENT}emit_static: SSA {name}");
+            ir::SsaExpr::new(ir)
+        };
+        ir::dump_static(&mut self.ofp_ssa_ir, name, &s.ty, ssa_ir.get());
     }
 }

@@ -11,32 +11,42 @@ pub fn from_expr(mut ir: super::Expr) -> super::Expr
     // Allocas are needed if:
     // - The variable is written twice
     // - The variable is borrowed
-    let mut borrowed = BitSet::new(ir.locals.len());
-    let mut written = BitSet::new(ir.locals.len());
-    let mut twice_written = BitSet::new(ir.locals.len());
-    for block in &ir.blocks {
-        for stmt in &block.statements {
-            let dst = match stmt {
-                Operation::AssignDeref(_, _) => continue,
+    let borrowed;
+    let twice_written;
+    {
+        struct VisitorEnum {
+            borrowed: BitSet,
+            written: BitSet,
+            twice_written: BitSet,
+        }
+        impl super::visit::Visitor for VisitorEnum {
+            fn writes_slot(&mut self, addr: super::visit::Addr, local_index: &super::LocalIndex) {
+                if self.written.set(local_index.0) {
+                    if !self.twice_written.set(local_index.0) {
+                        println!("{INDENT}{local_index:?}: Write twice @ {addr}",);
+                    }
+                }
+            }
+            fn operation(&mut self, addr: super::visit::Addr, op: &super::Operation) {
+                match op {
+                Operation::AssignDeref(_, _) => {},
                 Operation::BorrowLocal(local_index_dst, _is_mut, local_index_src, _wrappers) => {
-                    borrowed.set(local_index_src.0);
-                    local_index_dst
+                    if !self.borrowed.set(local_index_src.0) {
+                        println!("{INDENT}{local_index_src:?}: Borrowed @ {addr}",);
+                    }
+                    self.writes_slot(addr, local_index_dst);
                 },
-
-                |Operation::Alloca { dst: local_index, .. }
-                |Operation::AssignLocal(local_index, _)
-                |Operation::CreateComposite(local_index, _, _)
-                |Operation::CreateDataVariant(local_index, _, _, _)
-                |Operation::BinOp(local_index, _, _, _) 
-                |Operation::UniOp(local_index, _, _)
-                |Operation::BitShift(local_index, _, _, _)
-                |Operation::BorrowGlobal(local_index, _, _, _)
-                |Operation::PointerOffset(local_index, _, _, _) => local_index
-                };
-            if written.set(dst.0) {
-                twice_written.set(dst.0);
+                _ => super::visit::visit_operation(self, addr, op),
+                }
             }
         }
+        let mut v = VisitorEnum {
+            borrowed: BitSet::new(ir.locals.len()),
+            written: BitSet::new(ir.locals.len()),
+            twice_written: BitSet::new(ir.locals.len()),
+        };
+        super::visit::visit_expr(&mut v, &ir);
+        VisitorEnum { borrowed, written: _, twice_written } = v;
     }
     
     // For all of the multi-write values (and not borrowed), if they can be trivially turned into block params instead of making allocas
@@ -45,6 +55,8 @@ pub fn from_expr(mut ir: super::Expr) -> super::Expr
     //   > Find common point and inject block params there
     for slot in 0 .. ir.locals.len() {
         if twice_written.is_set(slot) && !borrowed.is_set(slot) {
+            let _i = INDENT.inc_f("ssa_ify: write", format_args!("_{slot}",));
+            
             struct ReadsState {
                 reads: Vec<super::visit::Addr>,
                 writes: Vec<super::visit::Addr>,
@@ -76,7 +88,17 @@ pub fn from_expr(mut ir: super::Expr) -> super::Expr
             // Routes from writes already processed
             let mut other_write_routes: Vec<super::visit::Route> = Vec::new();
 
-            let mut remap_table = ::std::collections::BTreeMap::<super::visit::Addr,super::LocalIndex>::new();
+            #[derive(PartialEq, Eq, PartialOrd, Ord)]
+            struct RemapKey {
+                addr: super::visit::Addr,
+                after_read: bool,
+            }
+            impl ::std::fmt::Debug for RemapKey {
+                fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    write!(f, "{}{}", self.addr, if self.after_read { "w" } else { "" })
+                }
+            }
+            let mut remap_table = ::std::collections::BTreeMap::<RemapKey,super::LocalIndex>::new();
 
             if rs.writes.windows(2).any(|w| w[0].block_idx == w[1].block_idx) {
                 // Only want to keep the second, the first should just get a new local allocated and an entry added to the remap table
@@ -141,20 +163,22 @@ pub fn from_expr(mut ir: super::Expr) -> super::Expr
                         rv
                     });
                     ir.blocks[block_idx].args.push(v);
-                    remap_table.insert(super::visit::Addr { block_idx: super::BlockIndex(block_idx), stmt_idx: 0}, v);
+                    remap_table.insert(RemapKey { addr: super::visit::Addr { block_idx: super::BlockIndex(block_idx), stmt_idx: 0}, after_read: false }, v);
                 }
             }
             for &w in &rs.writes {
                 let ty = ir.locals[slot].clone();
-                remap_table.insert(w, super::LocalIndex(ir.locals.len()));
+                remap_table.insert(RemapKey { addr: w, after_read: true }, super::LocalIndex(ir.locals.len()));
                 ir.locals.push(ty);
             }
+            println!("{INDENT}remap_table = {remap_table:?}",);
+
             // Propagate entries in the remap table
             {
                 let mut exit_table: Vec<_> = (0 .. ir.blocks.len()).map(|_| None).collect();
                 for (a,v) in remap_table.iter() {
                     // Since `remap_table` abvoe is a BTreeMap, it's sorted - so later remaps come first. This means that if we overwrite the `exit_table` entry it'll be correct
-                    exit_table[a.block_idx.0] = Some(*v);
+                    exit_table[a.addr.block_idx.0] = Some(*v);
                 }
                 let mut stack = Vec::new();
                 // Prime the stack with the block exits
@@ -166,10 +190,11 @@ pub fn from_expr(mut ir: super::Expr) -> super::Expr
                 while let Some((block_idx, local)) = stack.pop() {
                     let mut set = |tgt: &mut super::JumpTarget| {
                         if common_blocks.is_set(tgt.index) && tgt.args.last() != Some(&local) {
+                            println!("{INDENT}bb{block_idx} -> bb{b}: +arg {local:?}", b=tgt.index);
                             tgt.args.push(local);
                         }
                         else {
-                            remap_table.insert(super::visit::Addr { block_idx: super::BlockIndex(tgt.index), stmt_idx: 0}, local);
+                            remap_table.insert(RemapKey { addr: super::visit::Addr { block_idx: super::BlockIndex(tgt.index), stmt_idx: 0}, after_read: false }, local);
                         }
                         if exit_table[tgt.index].is_none() {
                             exit_table[tgt.index] = Some(local);
@@ -193,18 +218,20 @@ pub fn from_expr(mut ir: super::Expr) -> super::Expr
             // Apply the remap table
             struct V {
                 slot: usize,
-                remap_table: ::std::collections::BTreeMap<super::visit::Addr,super::LocalIndex>,
+                remap_table: ::std::collections::BTreeMap<RemapKey,super::LocalIndex>,
             }
             impl VisitorMut for V {
                 fn writes_slot(&mut self, addr: super::visit::Addr, local_index: &mut super::LocalIndex) {
                     if local_index.0 == self.slot {
-                        //*local_index = *self.remap_table.range(..=addr).last().unwrap().1
-                        *local_index = self.remap_table[&addr];
+                        let n = self.remap_table[&RemapKey { addr, after_read: true }];
+                        //let n = *self.remap_table.range(..=addr).last().unwrap().1
+                        println!("{INDENT}writes_slot: @{addr} {local_index:?} -> {n:?}");
+                        *local_index = n;
                     }   
                 }
                 fn reads_slot(&mut self, addr: super::visit::Addr, local_index: &mut super::LocalIndex) {
                     if local_index.0 == self.slot {
-                        let n = *self.remap_table.range(..addr).last().unwrap().1;
+                        let n = *self.remap_table.range(..=RemapKey { addr, after_read: false }).last().unwrap().1;
                         println!("{INDENT}reads_slot: @{addr} {local_index:?} -> {n:?}");
                         *local_index = n;
                     }   
