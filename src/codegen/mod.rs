@@ -12,9 +12,13 @@ mod ir;
 mod backend_cranelift;
 
 struct State<'a> {
-    ofp: ::std::fs::File,
+    #[cfg(feature="cranelift")]
+    out: backend_cranelift::Context,
     ofp_bare_ir: ::std::fs::File,
     ofp_ssa_ir: ::std::fs::File,
+    inner: InnerState<'a>,
+}
+struct InnerState<'a> {
     constants: HashMap<AbsolutePath,&'a crate::ast::ExprRoot>,
     fields: HashMap<AbsolutePath,HashMap<crate::Ident, (usize, crate::ast::Type)>>,
     types_cache: ::std::cell::RefCell< ::std::collections::BTreeMap< crate::ast::Type, type_info::TypeInfoRef > >,
@@ -23,14 +27,17 @@ struct State<'a> {
 pub fn generate(output: &::std::path::Path, krate: crate::ast::Crate) -> Result<(),::std::io::Error>
 {
     let mut state = State {
-        ofp: ::std::fs::File::create(output)?,
+        #[cfg(feature="cranelift")]
+        out: backend_cranelift::Context::new(output),
         ofp_bare_ir: ::std::fs::File::create(output.with_extension(".moss_ir"))?,
         ofp_ssa_ir: ::std::fs::File::create(output.with_extension(".moss_ssa"))?,
-        constants: Default::default(),
-        fields: Default::default(),
-        types_cache: Default::default(),
+        inner: InnerState {
+            constants: Default::default(),
+            fields: Default::default(),
+            types_cache: Default::default(),
+        }
     };
-    fn enum_module<'a>(state: &mut State<'a>, module: &'a crate::ast::items::Module, path: AbsolutePath) {
+    fn enum_module<'a>(state: &mut InnerState<'a>, module: &'a crate::ast::items::Module, path: AbsolutePath) {
         for item in &module.items {
             use crate::ast::items::ItemType;
             match item.ty {
@@ -48,12 +55,12 @@ pub fn generate(output: &::std::path::Path, krate: crate::ast::Crate) -> Result<
             }
         }
     }
-    enum_module(&mut state, &krate.module, AbsolutePath(Vec::new()));
+    enum_module(&mut state.inner, &krate.module, AbsolutePath(Vec::new()));
     state.visit_module(&krate.module);
     Ok( () )
 }
 
-impl<'a> State<'a> {
+impl<'a> InnerState<'a> {
     fn type_info(&self, ty: &crate::ast::Type) -> type_info::TypeInfoRef {
         use self::type_info::TypeInfo;
         use crate::ast::ty::{TypeKind,IntClass};
@@ -107,7 +114,9 @@ impl<'a> State<'a> {
                     }
                     TypeInfo::make_composite(size, align, repr_fields)
                 },
-                TypeBinding::ValueEnum(absolute_path) => todo!(),
+                TypeBinding::ValueEnum(_absolute_path) => {
+                    TypeInfo::make_primitive(IntClass::Unsigned(2))
+                },
                 TypeBinding::DataEnum(absolute_path) => todo!(),
                 }
             },
@@ -120,6 +129,9 @@ impl<'a> State<'a> {
 }
 
 impl<'a> State<'a> {
+    fn type_info(&self, ty: &crate::ast::Type) -> type_info::TypeInfoRef {
+        self.inner.type_info(ty)
+    }
     fn visit_module(&mut self, module: &crate::ast::items::Module) {
         for item in &module.items {
             use crate::ast::items::ItemType;
@@ -150,6 +162,10 @@ impl<'a> State<'a> {
             ir::SsaExpr::new(ir)
         };
         ir::dump_fcn(&mut self.ofp_ssa_ir, name, &f.sig, ssa_ir.get());
+
+        let p = crate::ast::path::AbsolutePath(vec![name.clone()]);
+        self.out.declare_function(p.clone(), &f.sig.args.iter().map(|(_p,t)| t.clone()).collect::<Vec<_>>(), &f.sig.ret);
+        self.out.lower_function(&self.inner, &p, ssa_ir.get());
     }
     fn emit_static(&mut self, name: &super::Ident, s: &crate::ast::items::Static) {
         let _i = INDENT.inc("emit_static");

@@ -157,7 +157,7 @@ impl<'a,'b> Visitor<'a,'b> {
             ValueBinding::Local(i) => Value::Local(super::LocalIndex(*i as _), Default::default()),
             ValueBinding::Static(ap) => Value::Named(ap.clone(), Default::default()),
             ValueBinding::Constant(absolute_path) => {
-                self.visit_expr( &self.parent.constants.get(absolute_path).expect("Missing constant?").e )
+                self.visit_expr( &self.parent.inner.constants.get(absolute_path).expect("Missing constant?").e )
             },
             ValueBinding::ValueEnumVariant(_absolute_path, idx) => {
                 // HACK: Assume that the variant isn't a data-holding variant
@@ -243,7 +243,7 @@ impl<'a,'b> Visitor<'a,'b> {
             |TypeBinding::DataEnum(_) => todo!(),
             TypeBinding::Union(absolute_path) => todo!(),
             TypeBinding::Struct(absolute_path) => {
-                let Some(fields) = self.parent.fields.get(absolute_path) else { panic!() };
+                let Some(fields) = self.parent.inner.fields.get(absolute_path) else { panic!() };
                 let mut out_values = vec![None; fields.len()];
                 for (name,value) in values {
                     out_values[ fields[name].0 ] = Some( self.visit_expr(value) );
@@ -269,7 +269,7 @@ impl<'a,'b> Visitor<'a,'b> {
                 //crate::ast::ty::TypeKind::Named(_, Some(crate::ast::path::TypeBinding::Union(p))) => p,
                 _ => panic!("Unexpected type for named field - {}", expr.data_ty),
                 };
-            let Some(ty_fields) = self.parent.fields.get(data_ty) else { panic!("Type {} not in fields cache", data_ty) };
+            let Some(ty_fields) = self.parent.inner.fields.get(data_ty) else { panic!("Type {} not in fields cache", data_ty) };
             let Some(&(idx,_)) = ty_fields.get(ident) else { panic!() };
             v.field(idx)
         },
@@ -683,7 +683,7 @@ impl<'a,'b> Visitor<'a,'b> {
             ValueBinding::Static(_) => panic!("{span}: Attempting to match against a static", span=pattern.span),
             //ValueBinding::StructValue(_) => {},
             ValueBinding::Constant(absolute_path) => {
-                let cv = self.visit_expr( &self.parent.constants.get(absolute_path).expect("Missing constant?").e );
+                let cv = self.visit_expr( &self.parent.inner.constants.get(absolute_path).expect("Missing constant?").e );
                 self.output.end_block(super::Terminator::Compare {
                     lhs: value, op: super::CmpOp::Eq, rhs: cv,
                     if_true: bb_true.into(),
