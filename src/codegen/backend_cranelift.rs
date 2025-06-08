@@ -1,14 +1,13 @@
 use crate::INDENT;
-use ::cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
-use cranelift_codegen::ir::{Signature, UserFuncName};
-use cranelift_codegen::ir::AbiParam;
+use ::cranelift_codegen::ir::{self as cr_ir, AbiParam};
+use super::ir as ms_ir;
 use crate::ast::path::AbsolutePath;
 use crate::ast::ty::TypeKind;
 use std::convert::TryFrom;
 
 pub struct Context
 {
-    functions: ::std::collections::HashMap<AbsolutePath, (UserFuncName, Signature)>
+    functions: ::std::collections::HashMap<AbsolutePath, (cr_ir::UserFuncName, cr_ir::Signature)>
 }
 
 impl Context
@@ -22,27 +21,29 @@ impl Context
     /// Forward-declare a function, allowing Cranelift generation to know its signature
     pub fn declare_function(&mut self, path: AbsolutePath, args: &[crate::ast::Type], ret: &crate::ast::Type) {
         let sig = {
-            let mut sig = cranelift_codegen::ir::Signature::new(cranelift_codegen::isa::CallConv::SystemV);
+            let mut sig = cr_ir::Signature::new(cranelift_codegen::isa::CallConv::SystemV);
             self.to_abi_params(&mut sig.returns, ret);
             for aty in args {
                 self.to_abi_params(&mut sig.params, aty);
             }
             sig
             };
-        let name = UserFuncName::user(0, self.functions.len() as u32);
+        let name = cr_ir::UserFuncName::user(0, self.functions.len() as u32);
         self.functions.insert(path, (name, sig));
 
     }
     /// Lower the body of a function
-    pub fn lower_function(&mut self, state: &super::InnerState, name: &AbsolutePath, ir: &super::ir::Expr)
+    pub fn lower_function(&mut self, state: &super::InnerState, name: &AbsolutePath, ir: &super::ir::SsaExpr)
     {
+        use cr_ir::InstBuilder;
+
+        let ir = ir.get();
         let _i = INDENT.inc_f("lower_function", format_args!("{}", name));
-        use cranelift_codegen::ir::InstBuilder;
-        let mut fn_builder_ctx = FunctionBuilderContext::new();
+        let mut fn_builder_ctx = ::cranelift_frontend::FunctionBuilderContext::new();
         let (name,sig) = self.functions.get(name).unwrap();
         let mut func = ::cranelift_codegen::ir::Function::with_name_signature(name.clone(), sig.clone());
     
-        let mut builder = FunctionBuilder::new(&mut func, &mut fn_builder_ctx);
+        let mut builder = ::cranelift_frontend::FunctionBuilder::new(&mut func, &mut fn_builder_ctx);
 
         #[derive(Debug)]
         enum VariableValue {
@@ -51,21 +52,59 @@ impl Context
             /// ZST, never assign and return nothing.
             Empty,
             /// This is a stack slot
-            StackSlot(cranelift_codegen::ir::StackSlot),
-            Value(cranelift_codegen::ir::Value),
+            StackSlot(cr_ir::StackSlot),
+            /// An assigned Cranelift value (a register)
+            Value(cr_ir::Value),
         }
-        struct State<'a> {
-            builder: &'a mut FunctionBuilder<'a>,
-            blocks: Vec<cranelift_codegen::ir::Block>,
+        struct State<'ir, 'a> {
+            ctxt: &'ir Context,
+            outer_state: &'ir super::InnerState<'ir>,
+            ir: &'ir super::ir::Expr,
+            builder: &'a mut ::cranelift_frontend::FunctionBuilder<'a>,
+            blocks: Vec<cr_ir::Block>,
             variables: Vec<VariableValue>,
         }
-        impl<'a> State<'a> {
+        impl<'ir, 'a> State<'ir, 'a> {
+            fn get_offset_from_wrappers<'ty>(&mut self, mut ty: &'ty crate::ast::Type, wrappers: &ms_ir::WrapperList) -> (cr_ir::Value, &'ty crate::ast::Type) {
+                let mut rv = self.builder.ins().iconst(cr_ir::Type::int(64).unwrap(), 0);
+                for w in wrappers.iter() {
+                    use ms_ir::Wrapper;
+                    match w {
+                    Wrapper::Field(idx) => {
+                        match &ty.kind {
+                        TypeKind::Array { inner, count: _ } | TypeKind::UnsizedArray(inner) => {
+                            let ti = self.outer_state.type_info(&inner);
+                            let ofs = (idx * ti.size()) as i64;
+                            rv = self.builder.ins().iadd_imm(rv, ofs);
+                            ty = inner;
+                        },
+                        _ => todo!("Get field offset for {ty} #{}", idx),
+                        }
+                    },
+                    Wrapper::IndexBySlot(local_index) => {
+                        let (TypeKind::Array { inner, count: _ } | TypeKind::UnsizedArray(inner)) = &ty.kind else {
+                            panic!("Indexing on invalid type: {}", ty);
+                        };
+                        let ti = self.outer_state.type_info(&inner);
+                        let VariableValue::Value(idx) = self.variables[local_index.0] else { todo!("Indexing with other value types? {:?}", self.variables[local_index.0]); };
+                        // rv = rv + idx * ti.size()
+                        let ofs = self.builder.ins().imul_imm(idx, ti.size() as i64);
+                        rv = self.builder.ins().iadd(rv, ofs);
+                        ty = inner;
+                    },
+                    }
+                }
+                (rv, ty)
+            }
             /// Obtain a cranelift `Value` from a moss IR `Value`, reading from memory or a stack slot if required
-            fn read_value(&mut self, value: &crate::codegen::ir::Value) -> cranelift_codegen::ir::Value {
-                use crate::codegen::ir::Value;
+            fn read_value(&mut self, value: &ms_ir::Value) -> cr_ir::Value {
+                use ms_ir::Value;
                 match value {
                 Value::Unreachable => todo!("Unreachable?"),
-                Value::ImplicitUnit => self.builder.ins().iconst(cranelift_codegen::ir::Type::int(8).unwrap(), 0),
+                // TODO: Do nothing here?
+                Value::ImplicitUnit => self.builder.ins().iconst(cr_ir::Type::int(8).unwrap(), 0),
+
+                // To read directly from a value
                 Value::Local(local_index, wrapper_list) => {
                     if !wrapper_list.is_empty() {
                         match self.variables[local_index.0] {
@@ -78,18 +117,45 @@ impl Context
                         }
                     }
                     match self.variables[local_index.0] {
-                    VariableValue::Unassigned => panic!("Unassigned slot? = #{}", local_index.0),
+                    VariableValue::Unassigned => panic!("Unassigned slot? _{}", local_index.0),
                     VariableValue::Empty => todo!("Empty value?"),
                     VariableValue::StackSlot(stack_slot) => todo!("stack"),
                     VariableValue::Value(value) => value,
                     }
                 },
                 Value::Named(absolute_path, wrapper_list) => todo!(),
-                Value::Deref { ptr, wrappers } => todo!(),
+                Value::Deref { ptr, wrappers } => {
+                    let TypeKind::Pointer { is_const: _, inner: ref val_ty } = self.ir.locals[ptr.0].kind else {
+                        panic!("Deref on non-pointer: {ptr:?} - {ty}", ty=self.ir.locals[ptr.0]);
+                    };
+                    let ptr = match self.variables[ptr.0] {
+                        VariableValue::Unassigned => panic!("Unassigned slot? _{}", ptr.0),
+                        VariableValue::Empty => panic!("Pointer was an empty value, shouldn't be possible - IR generaton error?"),
+                        VariableValue::StackSlot(_) => todo!("Load a pointer from a stack slot (why did a pointer end up assigned an alloca?)"),
+                        VariableValue::Value(value) => value,
+                        };
+                    if !wrappers.is_empty() {
+                        let (ofs, ty) = self.get_offset_from_wrappers(&val_ty, wrappers);
+                        let ptr = self.builder.ins().iadd(ptr, ofs);
+                        let mut flags = cr_ir::MemFlags::new();
+                        if false {
+                            flags.set_notrap();
+                        }
+                        match get_types(ty)
+                        {
+                        TranslatedType::Empty => todo!("Deref to empty type"),
+                        TranslatedType::Complex => todo!("Deref to complex type, will need to memcpy to destination"),
+                        TranslatedType::Single(cr_ty) => self.builder.ins().load(cr_ty, flags, ptr, 0),
+                        }
+                    }
+                    else {
+                        todo!("Read from pointer");
+                    }
+                },
                 Value::StringLiteral(string_literal) => todo!(),
                 Value::IntegerLiteral(value) =>
                     match u64::try_from(*value) {
-                    Ok(v) => self.builder.ins().iconst(cranelift_codegen::ir::Type::int(64).unwrap(), v as i64),
+                    Ok(v) => self.builder.ins().iconst(cr_ir::Type::int(64).unwrap(), v as i64),
                     Err(_) => todo!("big integer literal"),
                     },
                 Value::FunctionPointer(absolute_path, function_pointer_ty) => todo!(),
@@ -97,7 +163,7 @@ impl Context
             }
 
             /// Store a read cranelift value into the specified local
-            fn store_value(&mut self, local_index: &crate::codegen::ir::LocalIndex, value: cranelift_codegen::ir::Value) {
+            fn store_value(&mut self, local_index: &ms_ir::LocalIndex, value: cr_ir::Value) {
                 if let VariableValue::StackSlot(ss) = self.variables[local_index.0] {
                     self.builder.ins().stack_store(value, ss, 0);
                 }
@@ -107,14 +173,31 @@ impl Context
             }
 
             /// Helper to get the block and converted arguments for a jump target
-            fn get_jump(&mut self, block: &crate::codegen::ir::JumpTarget) -> (cranelift_codegen::ir::Block, Vec<cranelift_codegen::ir::Value>) {
+            fn get_jump(&mut self, block: &ms_ir::JumpTarget) -> (cr_ir::Block, Vec<cr_ir::Value>) {
                 (
-                    cranelift_codegen::ir::Block::from_u32(block.index as u32),
-                    block.args.iter().map(|l| self.read_value(&crate::codegen::ir::Value::Local(*l, Default::default()))).collect::<Vec<_>>()
+                    cr_ir::Block::from_u32(block.index as u32),
+                    block.args.iter().map(|l| self.read_value(&ms_ir::Value::Local(*l, Default::default()))).collect::<Vec<_>>()
                 )
+            }
+            fn get_val_list(&mut self, values: &[ms_ir::Value]) -> Vec<cr_ir::Value> {
+                values.iter().map(|l| self.read_value(l)).collect::<Vec<_>>()
+            }
+
+            fn get_function(&mut self, path: &crate::ast::path::AbsolutePath) -> cr_ir::FuncRef {
+                let fcn = &self.ctxt.functions[path];
+                let name = self.builder.func.declare_imported_user_function(fcn.0.get_user().unwrap().clone());
+                let signature = self.builder.import_signature(fcn.1.clone());
+                self.builder.import_function(cr_ir::ExtFuncData {
+                    name: cr_ir::ExternalName::User(name),
+                    signature,
+                    colocated: false
+                })
             }
         }
         let mut out_state = State {
+            ctxt: self,
+            outer_state: state,
+            ir,
             blocks: (0 .. ir.blocks.len()).map(|_| builder.create_block()).collect(),
             variables: ir.locals.iter().map(|_| VariableValue::Unassigned).collect(),
             builder: &mut builder,
@@ -127,8 +210,8 @@ impl Context
             },
             _ if is_type_complex(ty) => {
                 let ti = state.type_info(ty);
-                out_state.variables[i] = VariableValue::StackSlot(out_state.builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData {
-                    kind: cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
+                out_state.variables[i] = VariableValue::StackSlot(out_state.builder.create_sized_stack_slot(cr_ir::StackSlotData {
+                    kind: cr_ir::StackSlotKind::ExplicitSlot,
                     size: ti.size() as u32,
                     align_shift: ti.align().trailing_zeros() as u8,
                 }));
@@ -170,12 +253,12 @@ impl Context
             println!("{INDENT}bb{}", block_idx);
             for (stmt_idx, stmt) in block.statements.iter().enumerate() {
                 println!("{INDENT}BB{block_idx}/{stmt_idx}: {:?}", stmt);
-                use super::ir::Operation;
+                use ms_ir::Operation;
                 match stmt {
                 Operation::Alloca { dst, ty } => {
                     let ti = state.type_info(ty);
-                    out_state.variables[dst.0] = VariableValue::StackSlot(out_state.builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData {
-                        kind: cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
+                    out_state.variables[dst.0] = VariableValue::StackSlot(out_state.builder.create_sized_stack_slot(cr_ir::StackSlotData {
+                        kind: cr_ir::StackSlotKind::ExplicitSlot,
                         size: ti.size() as u32,
                         align_shift: ti.align().trailing_zeros() as u8,
                     }));
@@ -188,7 +271,7 @@ impl Context
                 Operation::CreateComposite(local_index, absolute_path, values) => todo!(),
                 Operation::CreateDataVariant(local_index, absolute_path, _, values) => todo!(),
                 Operation::BinOp(local_index, value_r, bin_op, value_l) => {
-                    use crate::codegen::ir::BinOp;
+                    use ms_ir::BinOp;
                     let x = out_state.read_value(value_l);
                     let y = out_state.read_value(value_r);
                     let v = match ir.locals[local_index.0].kind {
@@ -214,17 +297,18 @@ impl Context
                 }
             }
 
-            use super::ir::Terminator;
+            use ms_ir::Terminator;
             println!("{INDENT}BB{block_idx}/T: {:?}", block.terminator);
             match &block.terminator {
             Terminator::Unreachable => todo!("terminator: Unreachable - is this even possible?"),
             Terminator::Goto(tgt) => {
-                out_state.builder.ins().jump(out_state.blocks[tgt.index], &[]);
+                let (call_label, call_args) = out_state.get_jump(tgt);
+                out_state.builder.ins().jump(call_label, &call_args);
             },
             Terminator::Return(value) => todo!("terminator: Return"),
             Terminator::Compare { lhs, op, rhs, if_true, if_false } => {
-                use crate::codegen::ir::CmpOp;
-                use ::cranelift_codegen::ir::condcodes::IntCC;
+                use ms_ir::CmpOp;
+                use cr_ir::condcodes::IntCC;
                 let cnd = match op {
                     CmpOp::Eq => IntCC::Equal,
                     CmpOp::Ne => IntCC::NotEqual,
@@ -241,7 +325,16 @@ impl Context
                 out_state.builder.ins().brif( cnd, then_label, &then_args, else_label, &else_args);
             },
             Terminator::MatchEnum { value, index, if_true, if_false  } => todo!("terminator: Match"),
-            Terminator::CallPath { dst, tgt, path, args } => todo!("terminator: CallPath"),
+            Terminator::CallPath { dst, tgt, path, args } => {
+                let args = out_state.get_val_list(&args);
+                let fr = out_state.get_function(path);
+                let call_inst = out_state.builder.ins().call(fr, &args);
+                let values = out_state.builder.inst_results(call_inst);
+                out_state.store_value(dst, values[0]);
+
+                let (call_label, call_args) = out_state.get_jump(tgt);
+                out_state.builder.ins().jump(call_label, &call_args);
+            },
             Terminator::CallValue { dst, tgt, ptr, args } => todo!("terminator: CallValue"),
             }
         }
@@ -249,7 +342,7 @@ impl Context
 
     pub fn to_abi_params(&self, dst: &mut Vec<AbiParam>, ty: &crate::ast::Type)
     {
-        use cranelift_codegen::ir::types as t;
+        use cr_ir::types as t;
         use crate::ast::ty::{TypeKind,IntClass};
         let ptr = t::I64;
         match &ty.kind {
@@ -283,47 +376,70 @@ impl Context
 
 }
 
+enum TranslatedType {
+    Empty,
+    Single(cr_ir::Type),
+    Complex,
+}
+fn get_types(ty: &crate::ast::Type) -> TranslatedType {
+    use cr_ir::types as t;
+    use crate::ast::ty::IntClass;
+    let ptr = t::I64;
+    match &ty.kind {
+    TypeKind::Infer { .. } | TypeKind::TypeOf(..) => panic!("Unexpanded {:?}", ty),
+    TypeKind::Void | TypeKind::UnsizedArray(..) => panic!("Unexpected {:?}", ty),
+
+    TypeKind::Bool => TranslatedType::Single(t::I8),
+    TypeKind::Integer(int_class) => TranslatedType::Single(match int_class
+        {
+        IntClass::PtrInt|IntClass::PtrDiff => ptr,
+        IntClass::Signed(shift)|IntClass::Unsigned(shift) => match shift
+            {
+            0 => t::I8,
+            1 => t::I16,
+            2 => t::I32,
+            3 => t::I64,
+            4 => t::I128,
+            _ => panic!("Too-large integer type"),
+            },
+        }),
+    TypeKind::Tuple(items) => match &items[..]
+        {
+        [] => TranslatedType::Empty,
+        [ty] => get_types(ty),
+        [..] => TranslatedType::Complex,
+        },
+    TypeKind::Named(type_path) => {
+        use crate::ast::path::TypeBinding;
+        let crate::ast::ty::TypePath::Resolved(b) = type_path else { panic!("Unbound named type {:?}", ty); };
+        match b {
+        TypeBinding::Alias(_) => panic!("Unresolved alias {:?}", ty),
+        TypeBinding::EnumVariant(_, _) => todo!("Type bound to enum variant? {:?}", ty),
+        // TODO: Structs and unions could be tagged with `#[repr(transparent)]` or otherwise only contain a single non-complex field, and thus fit in a register
+        TypeBinding::Union(_absolute_path) => TranslatedType::Complex,
+        TypeBinding::Struct(_absolute_path) => TranslatedType::Complex,
+        TypeBinding::ValueEnum(_) => TranslatedType::Single(t::I32),
+        TypeBinding::DataEnum(_) => TranslatedType::Complex,
+        }
+    },
+    TypeKind::Pointer { .. } => TranslatedType::Single(ptr),
+    TypeKind::Array { inner, count } => {
+        let &crate::ast::ty::ArraySize::Known(count) = count else { panic!("Unresolved type size: {:?}", ty); };
+        match count {
+        0 => TranslatedType::Empty,
+        1 => get_types(inner),
+        _ => TranslatedType::Complex,
+        }
+    },
+    }
+}
 
 /// Is the passed type too big (or complex) to store in a single cranelift register
 fn is_type_complex(t: &crate::ast::Type) -> bool {
-    use crate::ast::ty::TypeKind;
-    match &t.kind {
-    TypeKind::Infer { .. }|TypeKind::TypeOf(..) => panic!("Unexpected {:?}", t),
-
-    TypeKind::Void
-    |TypeKind::Bool
-    |TypeKind::Integer(..) => false,
-
-    TypeKind::Pointer { .. } => false,
-
-    TypeKind::Tuple(items) => {
-        match &items[..] {
-        [] => false,
-        [t] => is_type_complex(t),
-        _ => true,
-        }
-    },
-    TypeKind::Named(type_path) => {
-        use crate::ast::path::TypeBinding;
-        let crate::ast::ty::TypePath::Resolved(b) = type_path else { panic!("Unbound {:?}", t); };
-        match b {
-        TypeBinding::Alias(_) => panic!("Unresolved alias {:?}", t),
-        TypeBinding::EnumVariant(_, _) => todo!("Type bound to enum variant? {:?}", t),
-        // TODO: Structs and unions could be tagged with `#[repr(transparent)]` or otherwise only contain a single non-complex field, and thus fit in a register
-        TypeBinding::Union(_absolute_path) => true,
-        TypeBinding::Struct(_absolute_path) => true,
-        TypeBinding::ValueEnum(_) => false,
-        TypeBinding::DataEnum(_) => true,
-        }
-    },
-    TypeKind::Array { inner, count } => {
-        let &crate::ast::ty::ArraySize::Known(count) = count else { panic!("Unresolved type size: {:?}", t); };
-        match count {
-        0 => false,
-        1 => is_type_complex(inner),
-        _ => true,
-        }
-    },
-    TypeKind::UnsizedArray(_) => todo!(),
+    if let TranslatedType::Complex = get_types(t) {
+        true
+    }
+    else {
+        false
     }
 }

@@ -165,7 +165,7 @@ impl<'a> State<'a> {
 
         let p = crate::ast::path::AbsolutePath(vec![name.clone()]);
         self.out.declare_function(p.clone(), &f.sig.args.iter().map(|(_p,t)| t.clone()).collect::<Vec<_>>(), &f.sig.ret);
-        self.out.lower_function(&self.inner, &p, ssa_ir.get());
+        self.out.lower_function(&self.inner, &p, &ssa_ir);
     }
     fn emit_static(&mut self, name: &super::Ident, s: &crate::ast::items::Static) {
         let _i = INDENT.inc("emit_static");
