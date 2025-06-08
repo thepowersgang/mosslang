@@ -1,6 +1,8 @@
+//! Apply the results of type checking/inference to the expression tree
 use crate::INDENT;
 use crate::ast::ty::{Type,TypeKind};
 
+/// Apply ivars to expression tree
 pub fn commit_to_expr(ivars: &mut [super::ivars::IVarEnt], expr: &mut crate::ast::ExprRoot) {
     
     for (idx,iv) in ivars.iter_mut().enumerate() {
@@ -85,16 +87,34 @@ impl<'a> crate::ast::ExprVisitor for Visitor<'a> {
     fn visit_mut_expr(&mut self, expr: &mut crate::ast::expr::Expr) {
         let _i = INDENT.inc_f("commit: visit_expr", format_args!("{:?}", &expr.kind));
         self.commit_ivars_in(&expr.span, &mut expr.data_ty);
+        use crate::ast::expr::ExprKind;
         match expr.kind {
-        crate::ast::expr::ExprKind::Cast(_, ref mut ty) => {
+        ExprKind::Cast(_, ref mut ty) => {
             self.commit_ivars_in(&expr.span, ty);
             },
-        crate::ast::expr::ExprKind::TypeInfoSizeOf(ref mut ty) => {
+        ExprKind::TypeInfoSizeOf(ref mut ty) => {
             self.commit_ivars_in(&expr.span, ty);
             }
         _ => {},
         }
         crate::ast::visit_mut_expr(self, expr);
+        
+        match expr.kind {
+        ExprKind::Index(ref mut val_expr, _)
+        |ExprKind::FieldIndex(ref mut val_expr, _)
+        |ExprKind::FieldNamed(ref mut val_expr, _)
+        => {
+            // If indexing or accessing a field through a pointer, inject a Deref operation
+            if let TypeKind::Pointer { is_const: _, ref inner } = val_expr.data_ty.kind {
+                let ity = (**inner).clone();
+                let sp = expr.span.clone();
+                // Create a deref operation
+                **val_expr = ExprKind::Deref(Box::new(::std::mem::replace(&mut **val_expr, ExprKind::Continue.to_expr(sp.clone())))).to_expr(sp);
+                val_expr.data_ty = ity;
+            }
+            }
+        _ => {},
+        }
     }
 
     fn visit_mut_block(&mut self, block: &mut crate::ast::expr::Block) {
