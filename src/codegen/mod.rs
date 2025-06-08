@@ -179,6 +179,7 @@ impl<'a> State<'a> {
             ir::SsaExpr::new(ir)
         };
         ir::dump_fcn(&mut self.ofp_ssa_ir, name, &f.sig, ssa_ir.get());
+        ir::verify::check_ssa(ssa_ir.get(), f.sig.args.len());
 
         let p = crate::ast::path::AbsolutePath(vec![name.clone()]);
         self.out.declare_function(p.clone(), &f.sig.args, &f.sig.ret);

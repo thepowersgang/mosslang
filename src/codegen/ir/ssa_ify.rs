@@ -307,7 +307,5 @@ pub fn from_expr(mut ir: super::Expr) -> super::Expr
     new_ops.append(&mut ir.blocks[0].statements);
     ir.blocks[0].statements = new_ops;
 
-    super::verify::check_ssa(&ir);
-
     ir
 }

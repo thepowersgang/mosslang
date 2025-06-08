@@ -114,29 +114,42 @@ where
     V: ?Sized + Visitor,
 {
     use crate::codegen::ir::Terminator;
+    fn visit_target<V: ?Sized + Visitor>(visitor: &mut V, addr: Addr, tgt: &super::JumpTarget) {
+        for arg in &tgt.args {
+            visitor.reads_slot(addr, arg);
+        }
+    }
     match term {
     Terminator::Unreachable => {},
-    Terminator::Goto(_) => {},
+    Terminator::Goto(tgt) => {
+        visit_target(visitor, addr, tgt);
+    },
     Terminator::Return(value) => visitor.reads_value(addr, value),
-    Terminator::Compare { lhs: value_l, rhs: value_r, .. } => {
+    Terminator::Compare { lhs: value_l, op: _, rhs: value_r, if_false, if_true } => {
         visitor.reads_value(addr, value_l);
         visitor.reads_value(addr, value_r);
+        visit_target(visitor, addr, if_false);
+        visit_target(visitor, addr, if_true);
     },
-    Terminator::MatchEnum { value, .. } => {
+    Terminator::MatchEnum { value, if_false, if_true, .. } => {
         visitor.reads_value(addr, value);
+        visit_target(visitor, addr, if_false);
+        visit_target(visitor, addr, if_true);
     },
-    Terminator::CallPath { dst, path: _, args, tgt: _ } => {
+    Terminator::CallPath { dst, path: _, args, tgt } => {
         for v in args {
             visitor.reads_value(addr, v);
         }
         visitor.writes_slot(addr, dst);
+        visit_target(visitor, addr, tgt);
     },
-    Terminator::CallValue { dst, ptr, args, tgt: _} => {
+    Terminator::CallValue { dst, ptr, args, tgt } => {
         for v in args {
             visitor.reads_value(addr, v);
         }
         visitor.reads_slot(addr, ptr);
         visitor.writes_slot(addr, dst);
+        visit_target(visitor, addr, tgt);
     },
     }
 }
