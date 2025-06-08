@@ -18,8 +18,10 @@ struct State<'a> {
     ofp_ssa_ir: ::std::fs::File,
     inner: InnerState<'a>,
 }
+#[derive(Default)]
 struct InnerState<'a> {
     constants: HashMap<AbsolutePath,&'a crate::ast::ExprRoot>,
+    statics: HashMap<AbsolutePath,&'a crate::ast::Type>,
     fields: HashMap<AbsolutePath,HashMap<crate::Ident, (usize, crate::ast::Type)>>,
     types_cache: ::std::cell::RefCell< ::std::collections::BTreeMap< crate::ast::Type, type_info::TypeInfoRef > >,
 }
@@ -28,34 +30,49 @@ pub fn generate(output: &::std::path::Path, krate: crate::ast::Crate) -> Result<
 {
     let mut state = State {
         #[cfg(feature="cranelift")]
-        out: backend_cranelift::Context::new(output),
+        out: backend_cranelift::Context::new(output, "x86_64-elf"),
         ofp_bare_ir: ::std::fs::File::create(output.with_extension(".moss_ir"))?,
         ofp_ssa_ir: ::std::fs::File::create(output.with_extension(".moss_ssa"))?,
-        inner: InnerState {
-            constants: Default::default(),
-            fields: Default::default(),
-            types_cache: Default::default(),
-        }
+        inner: InnerState::default(),
     };
-    fn enum_module<'a>(state: &mut InnerState<'a>, module: &'a crate::ast::items::Module, path: AbsolutePath) {
+    fn enum_module<'a>(state: &mut State<'a>, module: &'a crate::ast::items::Module, path: AbsolutePath) {
         for item in &module.items {
             use crate::ast::items::ItemType;
             match item.ty {
+            ItemType::ExternBlock(ref b) => {
+                for item in &b.items {
+                    use crate::ast::items::ExternItemType;
+                    match &item.ty {
+                    ExternItemType::Function(v) => {
+                        #[cfg(feature="cranelift")]
+                        state.out.declare_function(path.append(item.name.clone()), &v.args, &v.ret);
+                    },
+                    ExternItemType::Static(v) => {
+                        state.inner.statics.insert(path.append(item.name.clone()), &v.ty);
+                        #[cfg(feature="cranelift")]
+                        state.out.declare_external_static(path.append(item.name.clone()), &v.ty);
+                    },
+                    }
+                }
+            },
             ItemType::Constant(ref v) => {
-                state.constants.insert(path.append(item.name.clone().unwrap()), &v.value);
+                state.inner.constants.insert(path.append(item.name.clone().unwrap()), &v.value);
+            },
+            ItemType::Static(ref v) => {
+                state.inner.statics.insert(path.append(item.name.clone().unwrap()), &v.ty);
             },
             ItemType::Struct(ref s) => {
                 let ap = path.append(item.name.as_ref().unwrap().clone());
                 let fields = s.fields.iter().enumerate()
                     .map(|(i,v)| (v.name.clone(), (i, v.ty.clone())))
                     .collect();
-                state.fields.insert( ap.clone(), fields );
+                state.inner.fields.insert( ap.clone(), fields );
             },
             _ => {},
             }
         }
     }
-    enum_module(&mut state.inner, &krate.module, AbsolutePath(Vec::new()));
+    enum_module(&mut state, &krate.module, AbsolutePath(Vec::new()));
     state.visit_module(&krate.module);
     Ok( () )
 }
@@ -164,7 +181,7 @@ impl<'a> State<'a> {
         ir::dump_fcn(&mut self.ofp_ssa_ir, name, &f.sig, ssa_ir.get());
 
         let p = crate::ast::path::AbsolutePath(vec![name.clone()]);
-        self.out.declare_function(p.clone(), &f.sig.args.iter().map(|(_p,t)| t.clone()).collect::<Vec<_>>(), &f.sig.ret);
+        self.out.declare_function(p.clone(), &f.sig.args, &f.sig.ret);
         self.out.lower_function(&self.inner, &p, &ssa_ir);
     }
     fn emit_static(&mut self, name: &super::Ident, s: &crate::ast::items::Static) {

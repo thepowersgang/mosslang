@@ -7,30 +7,55 @@ use std::convert::TryFrom;
 
 pub struct Context
 {
-    functions: ::std::collections::HashMap<AbsolutePath, (cr_ir::UserFuncName, cr_ir::Signature)>
+    module: ::cranelift_object::ObjectModule,
+    functions: ::std::collections::HashMap<AbsolutePath, (cr_ir::UserFuncName, DeclaredValueItem)>,
+    string_count: usize,
+}
+enum DeclaredValueItem {
+    Function {
+        sig: cr_ir::Signature,
+    },
+    ExternStatic,
 }
 
 impl Context
 {
-    pub fn new(output_path: &::std::path::Path) -> Context {
+    pub fn new(output_path: &::std::path::Path, isa_name: &str) -> Context {
+        let isa = {
+			let shared_builder = ::cranelift_codegen::settings::builder();
+			let shared_flags = ::cranelift_codegen::settings::Flags::new(shared_builder);
+			let b = ::cranelift_codegen::isa::lookup_by_name(isa_name).unwrap();
+			b.finish(shared_flags).expect("Failed to create TargetIsa")
+			};
+        let builder = ::cranelift_object::ObjectBuilder::new(
+				isa,
+				b"unknown_object.o"[..].to_owned(),
+				::cranelift_module::default_libcall_names(),
+				).expect("Can't create object builder");
         Context {
+            module: ::cranelift_object::ObjectModule::new(builder),
             functions: Default::default(),
+            string_count: 0,
         }
     }
 
     /// Forward-declare a function, allowing Cranelift generation to know its signature
-    pub fn declare_function(&mut self, path: AbsolutePath, args: &[crate::ast::Type], ret: &crate::ast::Type) {
+    pub fn declare_function(&mut self, path: AbsolutePath, args: &[(crate::ast::Pattern, crate::ast::Type)], ret: &crate::ast::Type) {
         let sig = {
             let mut sig = cr_ir::Signature::new(cranelift_codegen::isa::CallConv::SystemV);
             self.to_abi_params(&mut sig.returns, ret);
-            for aty in args {
+            for (_,aty) in args {
                 self.to_abi_params(&mut sig.params, aty);
             }
             sig
             };
         let name = cr_ir::UserFuncName::user(0, self.functions.len() as u32);
-        self.functions.insert(path, (name, sig));
-
+        self.functions.insert(path, (name, DeclaredValueItem::Function { sig }));
+    }
+    /// Forward-declare a function, allowing Cranelift generation to know its signature
+    pub fn declare_external_static(&mut self, path: AbsolutePath, _ty: &crate::ast::Type) {
+        let name = cr_ir::UserFuncName::user(0, self.functions.len() as u32);
+        self.functions.insert(path, (name, DeclaredValueItem::ExternStatic));
     }
     /// Lower the body of a function
     pub fn lower_function(&mut self, state: &super::InnerState, name: &AbsolutePath, ir: &super::ir::SsaExpr)
@@ -40,7 +65,7 @@ impl Context
         let ir = ir.get();
         let _i = INDENT.inc_f("lower_function", format_args!("{}", name));
         let mut fn_builder_ctx = ::cranelift_frontend::FunctionBuilderContext::new();
-        let (name,sig) = self.functions.get(name).unwrap();
+        let Some((name, DeclaredValueItem::Function { sig })) = self.functions.get(name) else { panic!("{} not defined as a function", name) };
         let mut func = ::cranelift_codegen::ir::Function::with_name_signature(name.clone(), sig.clone());
     
         let mut builder = ::cranelift_frontend::FunctionBuilder::new(&mut func, &mut fn_builder_ctx);
@@ -57,7 +82,7 @@ impl Context
             Value(cr_ir::Value),
         }
         struct State<'ir, 'a> {
-            ctxt: &'ir Context,
+            ctxt: &'ir mut Context,
             outer_state: &'ir super::InnerState<'ir>,
             ir: &'ir super::ir::Expr,
             builder: &'a mut ::cranelift_frontend::FunctionBuilder<'a>,
@@ -123,7 +148,20 @@ impl Context
                     VariableValue::Value(value) => value,
                     }
                 },
-                Value::Named(absolute_path, wrapper_list) => todo!(),
+                Value::Named(absolute_path, wrapper_list) => {
+                    let (ty,gv) = self.get_global(absolute_path);
+                    if !wrapper_list.is_empty() {
+                        todo!("Load global with wrappers")
+                    }
+                    else {
+                        match get_types(ty)
+                        {
+                        TranslatedType::Empty => todo!("Global is empty type"),
+                        TranslatedType::Complex => todo!("Global to complex type, will need to memcpy to destination"),
+                        TranslatedType::Single(cr_ty) => self.builder.ins().global_value(cr_ty, gv),
+                        }
+                    }
+                },
                 Value::Deref { ptr, wrappers } => {
                     let TypeKind::Pointer { is_const: _, inner: ref val_ty } = self.ir.locals[ptr.0].kind else {
                         panic!("Deref on non-pointer: {ptr:?} - {ty}", ty=self.ir.locals[ptr.0]);
@@ -152,7 +190,21 @@ impl Context
                         todo!("Read from pointer");
                     }
                 },
-                Value::StringLiteral(string_literal) => todo!(),
+                Value::StringLiteral(string_literal) => {
+                    use cranelift_module::Module;
+                    let string_name = format!("str#{}", self.ctxt.string_count);
+                    self.ctxt.string_count += 1;
+                    // Declare
+                    let did = self.ctxt.module.declare_data(&string_name, ::cranelift_module::Linkage::Local, /*writeable*/false, /*tls*/false)
+                        .expect("Failed to declare");
+                    // Define
+                    let mut data_ctx = ::cranelift_module::DataDescription::new();
+                    data_ctx.define({ let mut val = string_literal.as_bytes().to_owned(); val.push(0); val.into_boxed_slice() });
+                    self.ctxt.module.define_data(did, &data_ctx).expect("create_string - define_data");
+                    // Use
+                    let gv = self.ctxt.module.declare_data_in_func(did, self.builder.func);
+                    self.builder.ins().symbol_value( self.ctxt.ptr_ty(), gv )
+                },
                 Value::IntegerLiteral(value) =>
                     match u64::try_from(*value) {
                     Ok(v) => self.builder.ins().iconst(cr_ir::Type::int(64).unwrap(), v as i64),
@@ -184,14 +236,26 @@ impl Context
             }
 
             fn get_function(&mut self, path: &crate::ast::path::AbsolutePath) -> cr_ir::FuncRef {
-                let fcn = &self.ctxt.functions[path];
-                let name = self.builder.func.declare_imported_user_function(fcn.0.get_user().unwrap().clone());
-                let signature = self.builder.import_signature(fcn.1.clone());
+                let Some((name, DeclaredValueItem::Function { sig })) = self.ctxt.functions.get(path) else { panic!("{} not defined as a function",path) };
+                let name = self.builder.func.declare_imported_user_function(name.get_user().unwrap().clone());
+                let signature = self.builder.import_signature(sig.clone());
                 self.builder.import_function(cr_ir::ExtFuncData {
                     name: cr_ir::ExternalName::User(name),
                     signature,
                     colocated: false
                 })
+            }
+            fn get_global(&mut self, path: &crate::ast::path::AbsolutePath) -> (&crate::ast::Type, cr_ir::GlobalValue) {
+                let Some(ty) = self.outer_state.statics.get(path) else { panic!("Undefined static {}", path) };
+                let Some((name, DeclaredValueItem::ExternStatic)) = self.ctxt.functions.get(path) else { panic!("{} not defined as a static",path) };
+                let name = self.builder.func.declare_imported_user_function(name.get_user().unwrap().clone());
+                let gv = self.builder.create_global_value(cr_ir::GlobalValueData::Symbol {
+                    name: cr_ir::ExternalName::User(name),
+                    offset: 0.into(),
+                    colocated: false,
+                    tls: false
+                });
+                (ty,gv)
             }
         }
         let mut out_state = State {
@@ -220,6 +284,7 @@ impl Context
             }
         }
 
+        // Define block parameters
         for (i,block) in ir.blocks.iter().enumerate() {
             if i == 0 {
                 out_state.builder.append_block_params_for_function_params(out_state.blocks[0]);
@@ -232,9 +297,13 @@ impl Context
             else {
                 for p in block.args.iter() {
                     if let VariableValue::Unassigned = out_state.variables[p.0] {
-                        let mut v = Vec::new();
-                        self.to_abi_params(&mut v, &ir.locals[p.0]);
-                        out_state.builder.append_block_param(out_state.blocks[i], v[0].value_type);
+                        match get_types(&ir.locals[p.0]) {
+                        TranslatedType::Empty => todo!(),
+                        TranslatedType::Single(cr_ty) => {
+                            out_state.builder.append_block_param(out_state.blocks[i], cr_ty);
+                        },
+                        TranslatedType::Complex => todo!(),
+                        }
                     }
                 }
                 for (p,v) in Iterator::zip( block.args.iter(), out_state.builder.block_params(out_state.blocks[i]) ) {
@@ -245,10 +314,44 @@ impl Context
             }
         }
 
+        // Enumerate a visit order, so all variables are populated before they're used
+        let block_visit_order = {
+            let mut v = Vec::with_capacity(ir.blocks.len());
+            let mut visited = crate::helpers::BitSet::new(ir.blocks.len());
+            let mut stack = Vec::new();
+            stack.push(0);
+            while let Some(idx) = stack.pop() {
+                if visited.set(idx) {
+                    continue ;
+                }
+                v.push(idx);
+                match &ir.blocks[idx].terminator {
+                ms_ir::Terminator::Unreachable => {},
+                ms_ir::Terminator::Return(_) => {},
+
+                ms_ir::Terminator::Goto(tgt)
+                |ms_ir::Terminator::CallPath { tgt, .. }
+                |ms_ir::Terminator::CallValue { tgt, .. } => {
+                    stack.push(tgt.index);
+                },
+
+                ms_ir::Terminator::Compare { if_true, if_false, .. }
+                |ms_ir::Terminator::MatchEnum { if_true, if_false, .. } => {
+                    stack.push(if_true.index);
+                    stack.push(if_false.index);
+                },
+                }
+            }
+            v
+        };
+
         // Pre-seal the first block
         out_state.builder.seal_block(out_state.blocks[0]);
         // Start lowering blocks
-        for (block_idx,block) in ir.blocks.iter().enumerate() {
+        // - NOTE: Visit the blocks in execution order, so variables are poulated before use
+        //for (block_idx,block) in ir.blocks.iter().enumerate() {
+        for block_idx in block_visit_order {
+            let block = &ir.blocks[block_idx];
             out_state.builder.switch_to_block(out_state.blocks[block_idx]);
             println!("{INDENT}bb{}", block_idx);
             for (stmt_idx, stmt) in block.statements.iter().enumerate() {
@@ -305,7 +408,10 @@ impl Context
                 let (call_label, call_args) = out_state.get_jump(tgt);
                 out_state.builder.ins().jump(call_label, &call_args);
             },
-            Terminator::Return(value) => todo!("terminator: Return"),
+            Terminator::Return(value) => {
+                let v = out_state.read_value(value);
+                out_state.builder.ins().return_(&[v]);
+            },
             Terminator::Compare { lhs, op, rhs, if_true, if_false } => {
                 use ms_ir::CmpOp;
                 use cr_ir::condcodes::IntCC;
@@ -330,7 +436,11 @@ impl Context
                 let fr = out_state.get_function(path);
                 let call_inst = out_state.builder.ins().call(fr, &args);
                 let values = out_state.builder.inst_results(call_inst);
-                out_state.store_value(dst, values[0]);
+                match values {
+                [] => {},
+                [value] => out_state.store_value(dst, values[0]),
+                [..] => todo!("Multiple returns?"),
+                }
 
                 let (call_label, call_args) = out_state.get_jump(tgt);
                 out_state.builder.ins().jump(call_label, &call_args);
@@ -352,7 +462,7 @@ impl Context
         TypeKind::Bool => dst.push(AbiParam::new(t::I8)),
         TypeKind::Integer(int_class) => dst.push(AbiParam::new(match int_class
             {
-            IntClass::PtrInt|IntClass::PtrDiff => ptr,
+            IntClass::PtrInt|IntClass::PtrDiff => self.ptr_ty(),
             IntClass::Signed(shift)|IntClass::Unsigned(shift) => match shift
                 {
                 0 => t::I8,
@@ -369,11 +479,15 @@ impl Context
             }
         },
         TypeKind::Named(path) => todo!(),
-        TypeKind::Pointer { .. } => dst.push(AbiParam::new(ptr)),
+        TypeKind::Pointer { .. } => dst.push(AbiParam::new(self.ptr_ty())),
         TypeKind::Array { inner, count } => todo!(),
         }
     }
 
+
+    fn ptr_ty(&self) -> cr_ir::Type {
+        cr_ir::types::I64
+    }
 }
 
 enum TranslatedType {

@@ -24,6 +24,9 @@ impl StringLiteral {
     pub fn from_bytes(v: Vec<u8>) -> Self {
         StringLiteral(v)
     }
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.0
+    }
 }
 impl ::core::fmt::Debug for StringLiteral {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
