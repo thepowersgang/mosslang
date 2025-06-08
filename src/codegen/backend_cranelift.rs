@@ -81,6 +81,25 @@ impl Context
             /// An assigned Cranelift value (a register)
             Value(cr_ir::Value),
         }
+        enum ReadValue {
+            Empty,
+            Single(cr_ir::Value),
+            //Multiple,
+        }
+        impl ReadValue {
+            fn unwrap_single(self) -> cr_ir::Value {
+                match self {
+                ReadValue::Empty => panic!("Expected a single-register value, got empty"),
+                ReadValue::Single(value) => value,
+                }
+            }
+            fn into_iter(self) -> impl Iterator<Item=cr_ir::Value> {
+                match self {
+                ReadValue::Empty => None,
+                ReadValue::Single(value) => Some(value),
+                }.into_iter()
+            }
+        }
         struct State<'ir, 'a> {
             ctxt: &'ir mut Context,
             outer_state: &'ir super::InnerState<'ir>,
@@ -122,12 +141,12 @@ impl Context
                 (rv, ty)
             }
             /// Obtain a cranelift `Value` from a moss IR `Value`, reading from memory or a stack slot if required
-            fn read_value(&mut self, value: &ms_ir::Value) -> cr_ir::Value {
+            fn read_value(&mut self, value: &ms_ir::Value) -> ReadValue {
                 use ms_ir::Value;
                 match value {
                 Value::Unreachable => todo!("Unreachable?"),
                 // TODO: Do nothing here?
-                Value::ImplicitUnit => self.builder.ins().iconst(cr_ir::Type::int(8).unwrap(), 0),
+                Value::ImplicitUnit => ReadValue::Empty,
 
                 // To read directly from a value
                 Value::Local(local_index, wrapper_list) => {
@@ -143,9 +162,9 @@ impl Context
                     }
                     match self.variables[local_index.0] {
                     VariableValue::Unassigned => panic!("Unassigned slot? _{}", local_index.0),
-                    VariableValue::Empty => todo!("Empty value?"),
+                    VariableValue::Empty => ReadValue::Empty,
                     VariableValue::StackSlot(stack_slot) => todo!("stack"),
-                    VariableValue::Value(value) => value,
+                    VariableValue::Value(value) => ReadValue::Single(value),
                     }
                 },
                 Value::Named(absolute_path, wrapper_list) => {
@@ -156,9 +175,9 @@ impl Context
                     else {
                         match get_types(ty)
                         {
-                        TranslatedType::Empty => todo!("Global is empty type"),
+                        TranslatedType::Empty => ReadValue::Empty,
                         TranslatedType::Complex => todo!("Global to complex type, will need to memcpy to destination"),
-                        TranslatedType::Single(cr_ty) => self.builder.ins().global_value(cr_ty, gv),
+                        TranslatedType::Single(cr_ty) => ReadValue::Single(self.builder.ins().global_value(cr_ty, gv)),
                         }
                     }
                 },
@@ -183,7 +202,7 @@ impl Context
                         {
                         TranslatedType::Empty => todo!("Deref to empty type"),
                         TranslatedType::Complex => todo!("Deref to complex type, will need to memcpy to destination"),
-                        TranslatedType::Single(cr_ty) => self.builder.ins().load(cr_ty, flags, ptr, 0),
+                        TranslatedType::Single(cr_ty) => ReadValue::Single(self.builder.ins().load(cr_ty, flags, ptr, 0)),
                         }
                     }
                     else {
@@ -203,11 +222,11 @@ impl Context
                     self.ctxt.module.define_data(did, &data_ctx).expect("create_string - define_data");
                     // Use
                     let gv = self.ctxt.module.declare_data_in_func(did, self.builder.func);
-                    self.builder.ins().symbol_value( self.ctxt.ptr_ty(), gv )
+                    ReadValue::Single(self.builder.ins().symbol_value( self.ctxt.ptr_ty(), gv ))
                 },
                 Value::IntegerLiteral(value) =>
                     match u64::try_from(*value) {
-                    Ok(v) => self.builder.ins().iconst(cr_ir::Type::int(64).unwrap(), v as i64),
+                    Ok(v) => ReadValue::Single(self.builder.ins().iconst(cr_ir::Type::int(64).unwrap(), v as i64)),
                     Err(_) => todo!("big integer literal"),
                     },
                 Value::FunctionPointer(absolute_path, function_pointer_ty) => todo!(),
@@ -228,11 +247,15 @@ impl Context
             fn get_jump(&mut self, block: &ms_ir::JumpTarget) -> (cr_ir::Block, Vec<cr_ir::Value>) {
                 (
                     cr_ir::Block::from_u32(block.index as u32),
-                    block.args.iter().map(|l| self.read_value(&ms_ir::Value::Local(*l, Default::default()))).collect::<Vec<_>>()
+                    block.args.iter()
+                        .flat_map(|l| self.read_value(&ms_ir::Value::Local(*l, Default::default())).into_iter())
+                        .collect::<Vec<_>>()
                 )
             }
             fn get_val_list(&mut self, values: &[ms_ir::Value]) -> Vec<cr_ir::Value> {
-                values.iter().map(|l| self.read_value(l)).collect::<Vec<_>>()
+                values.iter()
+                    .flat_map(|l| self.read_value(l).into_iter())
+                    .collect::<Vec<_>>()
             }
 
             fn get_function(&mut self, path: &crate::ast::path::AbsolutePath) -> cr_ir::FuncRef {
@@ -368,15 +391,18 @@ impl Context
                 },
                 Operation::AssignLocal(local_index, value) => {
                     let value = out_state.read_value(value);
-                    out_state.store_value(local_index, value);
+                    match value {
+                    ReadValue::Empty => {},
+                    ReadValue::Single(value) => out_state.store_value(local_index, value),
+                    }
                 },
                 Operation::AssignDeref(local_index, value) => todo!("AssignDeref"),
                 Operation::CreateComposite(local_index, absolute_path, values) => todo!(),
                 Operation::CreateDataVariant(local_index, absolute_path, _, values) => todo!(),
                 Operation::BinOp(local_index, value_r, bin_op, value_l) => {
                     use ms_ir::BinOp;
-                    let x = out_state.read_value(value_l);
-                    let y = out_state.read_value(value_r);
+                    let x = out_state.read_value(value_l).unwrap_single();
+                    let y = out_state.read_value(value_r).unwrap_single();
                     let v = match ir.locals[local_index.0].kind {
                         TypeKind::Integer(_) => match bin_op {
                             BinOp::Add => out_state.builder.ins().iadd(x, y),
@@ -410,7 +436,7 @@ impl Context
             },
             Terminator::Return(value) => {
                 let v = out_state.read_value(value);
-                out_state.builder.ins().return_(&[v]);
+                out_state.builder.ins().return_(&v.into_iter().collect::<Vec<_>>());
             },
             Terminator::Compare { lhs, op, rhs, if_true, if_false } => {
                 use ms_ir::CmpOp;
@@ -423,8 +449,8 @@ impl Context
                     CmpOp::Gt => todo!(),
                     CmpOp::Ge => todo!(),
                 };
-                let x = out_state.read_value(lhs);
-                let y = out_state.read_value(rhs);
+                let x = out_state.read_value(lhs).unwrap_single();
+                let y = out_state.read_value(rhs).unwrap_single();
                 let cnd = out_state.builder.ins().icmp(cnd, x, y);
                 let (then_label, then_args) = out_state.get_jump(if_true);
                 let (else_label, else_args) = out_state.get_jump(if_false);
