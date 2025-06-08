@@ -136,7 +136,7 @@ impl<'a> ::std::fmt::Display for F<'a, super::Value> {
         Value::ImplicitUnit => write!(f, "()"),
         Value::Local(local_index, wrapper_list) => write!(f, "{}{}", F(local_index), F(wrapper_list)),
         Value::Named(absolute_path, wrapper_list) => write!(f, "{}{}", absolute_path, F(wrapper_list)),
-        Value::Deref { ptr, wrappers } => write!(f, "*{}{}", F(ptr), F(wrappers)),
+        Value::Deref { ptr, wrappers } => write!(f, "(*{}){}", F(ptr), F(wrappers)),
         Value::StringLiteral(string_literal) => write!(f, "{:?}", string_literal),
         Value::IntegerLiteral(v) => write!(f, "{:#x}", v),
         Value::FunctionPointer(path, super::FunctionPointerTy::Function) => write!(f, "{}", path),
