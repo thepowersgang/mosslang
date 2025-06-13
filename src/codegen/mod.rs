@@ -173,6 +173,7 @@ impl<'a> State<'a> {
         let ir = ir::Expr::from_ast(self, &f.code, &f.sig.args);
 
         ir::dump_fcn(&mut self.ofp_bare_ir, name, &f.sig, &ir);
+        ir::verify::check(&ir, f.sig.args.len());
 
         let ssa_ir = {
             println!("{INDENT}emit_function: SSA {name}");

@@ -1,6 +1,10 @@
 use crate::helpers::BitSet;
 use crate::INDENT;
 
+pub fn check(ir: &super::Expr, arg_count: usize)
+{
+    write_before_use(ir, arg_count);
+}
 pub fn check_ssa(ir: &super::Expr, arg_count: usize)
 {
     write_once(ir);

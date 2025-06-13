@@ -259,7 +259,7 @@ impl Context
             }
 
             fn get_function(&mut self, path: &crate::ast::path::AbsolutePath) -> cr_ir::FuncRef {
-                let Some((name, DeclaredValueItem::Function { sig })) = self.ctxt.functions.get(path) else { panic!("{} not defined as a function",path) };
+                let Some((name, DeclaredValueItem::Function { sig })) = self.ctxt.functions.get(path) else { panic!("{} not defined as a function" ,path) };
                 let name = self.builder.func.declare_imported_user_function(name.get_user().unwrap().clone());
                 let signature = self.builder.import_signature(sig.clone());
                 self.builder.import_function(cr_ir::ExtFuncData {
