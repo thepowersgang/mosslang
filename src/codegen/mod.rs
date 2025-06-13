@@ -68,6 +68,10 @@ pub fn generate(output: &::std::path::Path, krate: crate::ast::Crate) -> Result<
                     .collect();
                 state.inner.fields.insert( ap.clone(), fields );
             },
+            ItemType::Function(ref f) => {
+                #[cfg(feature="cranelift")]
+                state.out.declare_function(path.append(item.name.as_ref().unwrap().clone()), &f.sig.args, &f.sig.ret);
+            }
             _ => {},
             }
         }
