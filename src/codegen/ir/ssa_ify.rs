@@ -115,7 +115,10 @@ pub fn from_expr(mut ir: super::Expr) -> super::Expr
 
                 // Enumerate all routes a write could take
                 super::visit::enumerate_paths_from(&ir, *w, |a| {
-                    rs.reads.contains(&a) || (a != *w && rs.writes.contains(&a))
+                    false
+                    //|| (a.stmt_idx == 0 && common_blocks.is_set(a.block_idx.0))   // This would be an optimisation, but can't capture
+                    //|| rs.reads.contains(&a)  // Can't stop on a read, as there may be other reads through common blocks after it
+                    || (a != *w && rs.writes.contains(&a))  // But can (and should) stop on a write
                 },
                 |route| {
                     let mut is_read = false;
@@ -134,9 +137,10 @@ pub fn from_expr(mut ir: super::Expr) -> super::Expr
                     }
                     else {
                         // Check if there's a shared block with one already in the list
+                        // NOTE: We only care about blocks entered, hence the `.skip(1)`
                         for path in other_write_routes[..path_count].iter() {
-                            for bb_idx in route.blocks() {
-                                if path.blocks().any(|v| v == bb_idx) {
+                            for bb_idx in route.blocks().skip(1) {
+                                if path.blocks().skip(1).any(|v| v == bb_idx) {
                                     // Found a common point
                                     if !common_blocks.set(bb_idx) {
                                         println!("{INDENT}#{slot} Arms join at BB{bb_idx}")
@@ -266,7 +270,7 @@ pub fn from_expr(mut ir: super::Expr) -> super::Expr
                 fn reads_slot(&mut self, _: super::visit::Addr, local_index: &mut super::LocalIndex) {
                     if self.alloca_needed.is_set(local_index.0) {
                         todo!("update_use: Add a `_new = _I` before this statement");
-                    }   
+                    }
                 }
 
                 fn reads_value(&mut self, addr: super::visit::Addr, value: &mut super::Value) {
