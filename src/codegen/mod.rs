@@ -45,12 +45,12 @@ pub fn generate(output: &::std::path::Path, krate: crate::ast::Crate) -> Result<
                     match &item.ty {
                     ExternItemType::Function(v) => {
                         #[cfg(feature="cranelift")]
-                        state.out.declare_function(path.append(item.name.clone()), &v.args, &v.ret);
+                        state.out.declare_function(&state.inner, path.append(item.name.clone()), &v.args, &v.ret);
                     },
                     ExternItemType::Static(v) => {
                         state.inner.statics.insert(path.append(item.name.clone()), &v.ty);
                         #[cfg(feature="cranelift")]
-                        state.out.declare_external_static(path.append(item.name.clone()), &v.ty);
+                        state.out.declare_external_static(&state.inner, path.append(item.name.clone()), &v.ty);
                     },
                     }
                 }
@@ -70,7 +70,7 @@ pub fn generate(output: &::std::path::Path, krate: crate::ast::Crate) -> Result<
             },
             ItemType::Function(ref f) => {
                 #[cfg(feature="cranelift")]
-                state.out.declare_function(path.append(item.name.as_ref().unwrap().clone()), &f.sig.args, &f.sig.ret);
+                state.out.declare_function(&state.inner, path.append(item.name.as_ref().unwrap().clone()), &f.sig.args, &f.sig.ret);
             }
             _ => {},
             }
@@ -187,7 +187,6 @@ impl<'a> State<'a> {
         ir::verify::check_ssa(ssa_ir.get(), f.sig.args.len());
 
         let p = crate::ast::path::AbsolutePath(vec![name.clone()]);
-        self.out.declare_function(p.clone(), &f.sig.args, &f.sig.ret);
         self.out.lower_function(&self.inner, &p, &ssa_ir);
     }
     fn emit_static(&mut self, name: &super::Ident, s: &crate::ast::items::Static) {

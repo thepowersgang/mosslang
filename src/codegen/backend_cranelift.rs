@@ -14,6 +14,7 @@ pub struct Context
 enum DeclaredValueItem {
     Function {
         sig: cr_ir::Signature,
+        indirect_return: bool,
     },
     ExternStatic,
 }
@@ -40,20 +41,27 @@ impl Context
     }
 
     /// Forward-declare a function, allowing Cranelift generation to know its signature
-    pub fn declare_function(&mut self, path: AbsolutePath, args: &[(crate::ast::Pattern, crate::ast::Type)], ret: &crate::ast::Type) {
+    pub fn declare_function(&mut self, state: &super::InnerState, path: AbsolutePath, args: &[(crate::ast::Pattern, crate::ast::Type)], ret: &crate::ast::Type) {
+        let indirect_return;
         let sig = {
             let mut sig = cr_ir::Signature::new(cranelift_codegen::isa::CallConv::SystemV);
-            self.to_abi_params(&mut sig.returns, ret);
+            indirect_return = !state.type_info(ret).is_primitive_like();
+            if indirect_return {
+                sig.params.push(AbiParam::new(self.ptr_ty()));
+            }
+            else {
+                self.to_abi_params(state, &mut sig.returns, ret);
+            }
             for (_,aty) in args {
-                self.to_abi_params(&mut sig.params, aty);
+                self.to_abi_params(state, &mut sig.params, aty);
             }
             sig
             };
         let name = cr_ir::UserFuncName::user(0, self.functions.len() as u32);
-        self.functions.insert(path, (name, DeclaredValueItem::Function { sig }));
+        self.functions.insert(path, (name, DeclaredValueItem::Function { sig, indirect_return }));
     }
     /// Forward-declare a function, allowing Cranelift generation to know its signature
-    pub fn declare_external_static(&mut self, path: AbsolutePath, _ty: &crate::ast::Type) {
+    pub fn declare_external_static(&mut self, _state: &super::InnerState, path: AbsolutePath, _ty: &crate::ast::Type) {
         let name = cr_ir::UserFuncName::user(0, self.functions.len() as u32);
         self.functions.insert(path, (name, DeclaredValueItem::ExternStatic));
     }
@@ -65,7 +73,7 @@ impl Context
         let ir = ir.get();
         let _i = INDENT.inc_f("lower_function", format_args!("{}", name));
         let mut fn_builder_ctx = ::cranelift_frontend::FunctionBuilderContext::new();
-        let Some((name, DeclaredValueItem::Function { sig })) = self.functions.get(name) else { panic!("{} not defined as a function", name) };
+        let Some(&(ref name, DeclaredValueItem::Function { ref sig, indirect_return })) = self.functions.get(name) else { panic!("{} not defined as a function", name) };
         let mut func = ::cranelift_codegen::ir::Function::with_name_signature(name.clone(), sig.clone());
     
         let mut builder = ::cranelift_frontend::FunctionBuilder::new(&mut func, &mut fn_builder_ctx);
@@ -84,18 +92,21 @@ impl Context
         enum ReadValue {
             Empty,
             Single(cr_ir::Value),
+            Stack(cr_ir::StackSlot, crate::ast::Type, usize),
             //Multiple,
         }
         impl ReadValue {
             fn unwrap_single(self) -> cr_ir::Value {
                 match self {
                 ReadValue::Empty => panic!("Expected a single-register value, got empty"),
+                ReadValue::Stack(_, _, _) => panic!("Expected a single-register value, got a stack slot"),
                 ReadValue::Single(value) => value,
                 }
             }
             fn into_iter(self) -> impl Iterator<Item=cr_ir::Value> {
                 match self {
                 ReadValue::Empty => None,
+                ReadValue::Stack(_, _, _) => panic!("into_iter for stack slot"),
                 ReadValue::Single(value) => Some(value),
                 }.into_iter()
             }
@@ -163,7 +174,7 @@ impl Context
                     match self.variables[local_index.0] {
                     VariableValue::Unassigned => panic!("Unassigned slot? _{}", local_index.0),
                     VariableValue::Empty => ReadValue::Empty,
-                    VariableValue::StackSlot(stack_slot) => todo!("stack"),
+                    VariableValue::StackSlot(stack_slot) => ReadValue::Stack(stack_slot, self.ir.locals[local_index.0].clone(), 0),
                     VariableValue::Value(value) => ReadValue::Single(value),
                     }
                 },
@@ -259,7 +270,7 @@ impl Context
             }
 
             fn get_function(&mut self, path: &crate::ast::path::AbsolutePath) -> cr_ir::FuncRef {
-                let Some((name, DeclaredValueItem::Function { sig })) = self.ctxt.functions.get(path) else { panic!("{} not defined as a function" ,path) };
+                let Some((name, DeclaredValueItem::Function { sig, .. })) = self.ctxt.functions.get(path) else { panic!("{} not defined as a function" ,path) };
                 let name = self.builder.func.declare_imported_user_function(name.get_user().unwrap().clone());
                 let signature = self.builder.import_signature(sig.clone());
                 self.builder.import_function(cr_ir::ExtFuncData {
@@ -308,10 +319,15 @@ impl Context
         }
 
         // Define block parameters
+        let mut return_ptr = None;
         for (i,block) in ir.blocks.iter().enumerate() {
             if i == 0 {
                 out_state.builder.append_block_params_for_function_params(out_state.blocks[0]);
-                for (i,v) in out_state.builder.block_params(out_state.blocks[i]).iter().enumerate() {
+                let mut it = out_state.builder.block_params(out_state.blocks[i]).iter();
+                if indirect_return {
+                    return_ptr = it.next().copied();
+                }
+                for (i,v) in it.enumerate() {
                     if let VariableValue::Unassigned = out_state.variables[i] {
                         out_state.variables[i] = VariableValue::Value(*v);
                     }
@@ -336,6 +352,7 @@ impl Context
                 }
             }
         }
+        let return_ptr = return_ptr;
 
         // Enumerate a visit order, so all variables are populated before they're used
         let block_visit_order = {
@@ -394,10 +411,28 @@ impl Context
                     match value {
                     ReadValue::Empty => {},
                     ReadValue::Single(value) => out_state.store_value(local_index, value),
+                    ReadValue::Stack(src_ss, ty, src_ofs) => {
+                        let ti = out_state.outer_state.type_info(&ty);
+                        if let VariableValue::StackSlot(dst_ss) = out_state.variables[local_index.0] {
+                            // TODO: only do the below if the type isn't a primtive (e.g. borrowed)
+                            for i in 0 .. ti.size() / 4 {
+                                let value = out_state.builder.ins().stack_load(cr_ir::types::I32, src_ss, (src_ofs + i * 4) as i32);
+                                out_state.builder.ins().stack_store(value, dst_ss, (i * 4) as i32);
+                            }
+                            let ofs = ti.size() - ti.size() % 4;
+                            for i in 0 .. ti.size() % 4 {
+                                let value = out_state.builder.ins().stack_load(cr_ir::types::I8, src_ss, (src_ofs + ofs + i) as i32);
+                                out_state.builder.ins().stack_store(value, dst_ss, (ofs + i) as i32);
+                            }
+                        }
+                        else {
+                            todo!("Assign from a stack slot to non-slot")
+                        }
+                    },
                     }
                 },
                 Operation::AssignDeref(local_index, value) => todo!("AssignDeref"),
-                Operation::CreateComposite(local_index, absolute_path, values) => todo!(),
+                Operation::CreateComposite(local_index, absolute_path, values) => todo!("CreateComposite"),
                 Operation::CreateDataVariant(local_index, absolute_path, _, values) => todo!(),
                 Operation::BinOp(local_index, value_r, bin_op, value_l) => {
                     use ms_ir::BinOp;
@@ -435,8 +470,13 @@ impl Context
                 out_state.builder.ins().jump(call_label, &call_args);
             },
             Terminator::Return(value) => {
-                let v = out_state.read_value(value);
-                out_state.builder.ins().return_(&v.into_iter().collect::<Vec<_>>());
+                if let Some(return_ptr) = return_ptr {
+                    todo!("Return large object");
+                }
+                else {
+                    let v = out_state.read_value(value);
+                    out_state.builder.ins().return_(&v.into_iter().collect::<Vec<_>>());
+                }
             },
             Terminator::Compare { lhs, op, rhs, if_true, if_false } => {
                 use ms_ir::CmpOp;
@@ -459,9 +499,12 @@ impl Context
             Terminator::MatchEnum { value, index, if_true, if_false  } => todo!("terminator: Match"),
             Terminator::CallPath { dst, tgt, path, args } => {
                 let args = out_state.get_val_list(&args);
+
                 let fr = out_state.get_function(path);
                 let call_inst = out_state.builder.ins().call(fr, &args);
+
                 let values = out_state.builder.inst_results(call_inst);
+                // TODO: Large return values may end up being an implicit pointer
                 match values {
                 [] => {},
                 [value] => out_state.store_value(dst, values[0]),
@@ -476,11 +519,10 @@ impl Context
         }
     }
 
-    pub fn to_abi_params(&self, dst: &mut Vec<AbiParam>, ty: &crate::ast::Type)
+    pub fn to_abi_params(&self, state: &super::InnerState, dst: &mut Vec<AbiParam>, ty: &crate::ast::Type)
     {
         use cr_ir::types as t;
         use crate::ast::ty::{TypeKind,IntClass};
-        let ptr = t::I64;
         match &ty.kind {
         TypeKind::Infer { .. } | TypeKind::TypeOf(..) => panic!("Unexpanded {:?}", ty),
         TypeKind::Void | TypeKind::UnsizedArray(..) => panic!("Unexpected {:?}", ty),
@@ -501,12 +543,27 @@ impl Context
             })),
         TypeKind::Tuple(items) => {
             for ty in items {
-                self.to_abi_params(dst, ty);
+                self.to_abi_params(state, dst, ty);
             }
         },
-        TypeKind::Named(path) => todo!(),
+        TypeKind::Named(..) => {
+            let ti = state.type_info(ty);
+            if ti.is_primitive_like() {
+                dst.push(AbiParam::new(match ti.size().trailing_zeros() {
+                    0 => t::I8,
+                    1 => t::I16,
+                    2 => t::I32,
+                    3 => t::I64,
+                    4 => t::I128,
+                    _ => panic!("Too-large integer type"),
+                    }));
+            }
+            else {
+                todo!("to_abi_params: {:?}", ty)
+            }
+        },
         TypeKind::Pointer { .. } => dst.push(AbiParam::new(self.ptr_ty())),
-        TypeKind::Array { inner, count } => todo!(),
+        TypeKind::Array { inner, count } => todo!("to_abi_params: {:?}", ty),
         }
     }
 

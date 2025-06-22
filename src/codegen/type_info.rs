@@ -60,4 +60,12 @@ impl TypeInfo {
     pub fn align(&self) -> usize {
         self.align
     }
+
+    /// Is this type compatible with a primitive (e.g. it is a primitive, or it's an enum)
+    pub fn is_primitive_like(&self) -> bool {
+        match self.fields {
+        Structure::Primitive => true,
+        _ => false,
+        }
+    }
 }

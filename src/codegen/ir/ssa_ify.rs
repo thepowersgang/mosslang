@@ -32,9 +32,9 @@ pub fn from_expr(mut ir: super::Expr) -> super::Expr
                 match op {
                 Operation::AssignDeref(_, _) => {},
                 Operation::BorrowLocal(local_index_dst, _is_mut, local_index_src, _wrappers) => {
-                    if !self.borrowed.set(local_index_src.0) {
-                        println!("{INDENT}{local_index_src:?}: Borrowed @ {addr}",);
-                    }
+                    //if !self.borrowed.set(local_index_src.0) {
+                    //    println!("{INDENT}{local_index_src:?}: Borrowed @ {addr}",);
+                    //}
                     self.writes_slot(addr, local_index_dst);
                 },
                 _ => super::visit::visit_operation(self, addr, op),
