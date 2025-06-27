@@ -15,7 +15,12 @@ pub struct TypeInfo {
 enum Structure {
     Primitive,
     Array(Rc<TypeInfo>),
-    Composite(Vec<(usize,Rc<TypeInfo>,)>),
+    Composite(Vec<CompositeField>),
+}
+pub struct CompositeField {
+    pub ofs: usize,
+    pub type_info: Rc<TypeInfo>,
+    //pub orig_ty: crate::ast::Type,
 }
 struct Variants {
     tag_field: usize,
@@ -37,7 +42,7 @@ impl TypeInfo {
             variants: None,
         }
     }
-    pub fn make_composite(size: usize, align: usize, fields: Vec<(usize,Rc<TypeInfo>,)>) -> Self {
+    pub fn make_composite(size: usize, align: usize, fields: Vec<CompositeField>) -> Self {
         TypeInfo {
             size,
             align,
@@ -66,6 +71,14 @@ impl TypeInfo {
         match self.fields {
         Structure::Primitive => true,
         _ => false,
+        }
+    }
+
+    pub fn as_composite(&self) -> Option<&[CompositeField]> {
+        match self.fields {
+        Structure::Primitive => None,
+        Structure::Array(_) => None,
+        Structure::Composite(ref items) => Some(items),
         }
     }
 }

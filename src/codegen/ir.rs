@@ -123,7 +123,7 @@ pub enum Operation {
     /// Assign a value to a dereference of a pointer (in a local variable)
     AssignDeref(LocalIndex, Value),
 
-    /// Create an instance of a composite value (tuple or struct)
+    /// Create an instance of a composite value (tuple or `struct`)
     CreateComposite(LocalIndex, Option<AbsolutePath>, Vec<Value>),
 
     /// Create an instance of a tagged-union enum

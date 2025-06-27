@@ -22,7 +22,8 @@ struct State<'a> {
 struct InnerState<'a> {
     constants: HashMap<AbsolutePath,&'a crate::ast::ExprRoot>,
     statics: HashMap<AbsolutePath,&'a crate::ast::Type>,
-    fields: HashMap<AbsolutePath,HashMap<crate::Ident, (usize, crate::ast::Type)>>,
+    fields: HashMap<AbsolutePath,HashMap<crate::Ident, (usize, &'a crate::ast::Type)>>,
+    field_types: HashMap<AbsolutePath,Vec<&'a crate::ast::Type>>,
     types_cache: ::std::cell::RefCell< ::std::collections::BTreeMap< crate::ast::Type, type_info::TypeInfoRef > >,
 }
 
@@ -64,9 +65,10 @@ pub fn generate(output: &::std::path::Path, krate: crate::ast::Crate) -> Result<
             ItemType::Struct(ref s) => {
                 let ap = path.append(item.name.as_ref().unwrap().clone());
                 let fields = s.fields.iter().enumerate()
-                    .map(|(i,v)| (v.name.clone(), (i, v.ty.clone())))
+                    .map(|(i,v)| (v.name.clone(), (i, &v.ty)))
                     .collect();
                 state.inner.fields.insert( ap.clone(), fields );
+                state.inner.field_types.insert(ap.clone(), s.fields.iter().map(|v| &v.ty).collect());
             },
             ItemType::Function(ref f) => {
                 #[cfg(feature="cranelift")]
@@ -105,9 +107,13 @@ impl<'a> InnerState<'a> {
                     let i = self.type_info(ity);
                     size += (i.align() - size % i.align()) % i.align();
                     align = align.max(i.align());
-                    let o = size;
+                    let ofs = size;
                     size += i.size();
-                    repr_fields.push((o, i));
+                    repr_fields.push(type_info::CompositeField {
+                        ofs,
+                        //orig_ty: ity.clone(),
+                        type_info: i
+                    });
                 }
                 TypeInfo::make_composite(size, align, repr_fields)
             },
@@ -129,9 +135,13 @@ impl<'a> InnerState<'a> {
                         let i = self.type_info(ity);
                         size += (i.align() - size % i.align()) % i.align();
                         align = align.max(i.align());
-                        let o = size;
+                        let ofs = size;
                         size += i.size();
-                        repr_fields.push((o, i));
+                        repr_fields.push(type_info::CompositeField {
+                            ofs,
+                            //orig_ty: (**ity).clone(),
+                            type_info: i,
+                        });
                     }
                     TypeInfo::make_composite(size, align, repr_fields)
                 },

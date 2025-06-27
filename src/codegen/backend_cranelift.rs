@@ -120,8 +120,12 @@ impl Context
             variables: Vec<VariableValue>,
         }
         impl<'ir, 'a> State<'ir, 'a> {
-            fn get_offset_from_wrappers<'ty>(&mut self, mut ty: &'ty crate::ast::Type, wrappers: &ms_ir::WrapperList) -> (cr_ir::Value, &'ty crate::ast::Type) {
-                let mut rv = self.builder.ins().iconst(cr_ir::Type::int(64).unwrap(), 0);
+            fn get_offset_from_wrappers<'ty>(&mut self, mut ty: &'ty crate::ast::Type, wrappers: &ms_ir::WrapperList) -> (Option<cr_ir::Value>, usize, &'ty crate::ast::Type)
+            where
+                'ir: 'ty
+            {
+                let mut ofs_dyn = None;
+                let mut ofs_fixed = 0;
                 for w in wrappers.iter() {
                     use ms_ir::Wrapper;
                     match w {
@@ -129,9 +133,32 @@ impl Context
                         match &ty.kind {
                         TypeKind::Array { inner, count: _ } | TypeKind::UnsizedArray(inner) => {
                             let ti = self.outer_state.type_info(&inner);
-                            let ofs = (idx * ti.size()) as i64;
-                            rv = self.builder.ins().iadd_imm(rv, ofs);
+                            let ofs = (idx * ti.size()) as usize;
+                            ofs_fixed += ofs;
                             ty = inner;
+                        },
+                        TypeKind::Named(tp) => {
+                            let ti = self.outer_state.type_info(&ty);
+                            let crate::ast::ty::TypePath::Resolved(p) = tp else { panic!(); };
+                            use crate::ast::path::TypeBinding;
+                            match p {
+                            TypeBinding::Alias(absolute_path) => panic!(),
+                            TypeBinding::Union(absolute_path) => todo!(),
+                            TypeBinding::Struct(absolute_path) => {
+                                let f = &ti.as_composite().unwrap()[idx];
+                                ofs_fixed += f.ofs;
+                                ty = self.outer_state.field_types[absolute_path][idx];
+                            },
+                            TypeBinding::ValueEnum(absolute_path) => todo!(),
+                            TypeBinding::DataEnum(absolute_path) => todo!(),
+                            TypeBinding::EnumVariant(absolute_path, _) => panic!(),
+                            }
+                        }
+                        TypeKind::Tuple(inner_tys) => {
+                            let ti = self.outer_state.type_info(&ty);
+                            let f = &ti.as_composite().unwrap()[idx];
+                            ofs_fixed += f.ofs;
+                            ty = &inner_tys[idx];
                         },
                         _ => todo!("Get field offset for {ty} #{}", idx),
                         }
@@ -144,12 +171,17 @@ impl Context
                         let VariableValue::Value(idx) = self.variables[local_index.0] else { todo!("Indexing with other value types? {:?}", self.variables[local_index.0]); };
                         // rv = rv + idx * ti.size()
                         let ofs = self.builder.ins().imul_imm(idx, ti.size() as i64);
-                        rv = self.builder.ins().iadd(rv, ofs);
+                        ofs_dyn = Some(if let Some(ofs_val) = ofs_dyn {
+                            self.builder.ins().iadd(ofs_val, ofs)
+                        }
+                        else {
+                            ofs
+                        });
                         ty = inner;
                     },
                     }
                 }
-                (rv, ty)
+                (ofs_dyn, ofs_fixed, ty)
             }
             /// Obtain a cranelift `Value` from a moss IR `Value`, reading from memory or a stack slot if required
             fn read_value(&mut self, value: &ms_ir::Value) -> ReadValue {
@@ -161,20 +193,32 @@ impl Context
 
                 // To read directly from a value
                 Value::Local(local_index, wrapper_list) => {
-                    if !wrapper_list.is_empty() {
-                        match self.variables[local_index.0] {
-                        VariableValue::StackSlot(stack_slot) => {
-                            for w in wrapper_list.iter() {
-                                todo!("Wrapper: {:?}", w);
+                    let val_ty = &self.ir.locals[local_index.0];
+                    let (ofs_dyn, ofs_fixed, ty) = self.get_offset_from_wrappers(val_ty, wrapper_list);
+                    if ofs_fixed > 0 || ofs_dyn.is_some() {
+                        let VariableValue::StackSlot(stack_slot) = self.variables[local_index.0] else {
+                            todo!("Indirect access on non-slot: {local_index:?} : {:?}", self.variables[local_index.0]);
+                        };
+                        return match get_types(ty)
+                        {
+                        TranslatedType::Empty => ReadValue::Empty,
+                        TranslatedType::Complex => todo!("Field to complex type, will need to memcpy to destination"),
+                        TranslatedType::Single(cr_ty) => ReadValue::Single(match ofs_dyn
+                            {
+                            None => self.builder.ins().stack_load(cr_ty, stack_slot, ofs_fixed as i32),
+                            Some(ofs_dyn) => {
+                                let ptr = self.builder.ins().stack_addr(self.ctxt.ptr_ty(), stack_slot, ofs_fixed as i32);
+                                let ptr = self.builder.ins().iadd(ptr, ofs_dyn);
+                                let flags = cr_ir::MemFlags::new();
+                                self.builder.ins().load(cr_ty, flags, ptr, 0)
                             }
-                        },
-                        ref s => todo!("Indirect access on non-slot: {local_index:?} : {:?}", s),
-                        }
+                            })
+                        };
                     }
                     match self.variables[local_index.0] {
                     VariableValue::Unassigned => panic!("Unassigned slot? _{}", local_index.0),
                     VariableValue::Empty => ReadValue::Empty,
-                    VariableValue::StackSlot(stack_slot) => ReadValue::Stack(stack_slot, self.ir.locals[local_index.0].clone(), 0),
+                    VariableValue::StackSlot(stack_slot) => ReadValue::Stack(stack_slot, ty.clone(), 0),
                     VariableValue::Value(value) => ReadValue::Single(value),
                     }
                 },
@@ -203,8 +247,8 @@ impl Context
                         VariableValue::Value(value) => value,
                         };
                     if !wrappers.is_empty() {
-                        let (ofs, ty) = self.get_offset_from_wrappers(&val_ty, wrappers);
-                        let ptr = self.builder.ins().iadd(ptr, ofs);
+                        let (ofs_dyn, ofs_fixed, ty) = self.get_offset_from_wrappers(&val_ty, wrappers);
+                        let ptr = if let Some(ofs) = ofs_dyn { self.builder.ins().iadd(ptr, ofs) } else { ptr };
                         let mut flags = cr_ir::MemFlags::new();
                         if false {
                             flags.set_notrap();
@@ -213,7 +257,7 @@ impl Context
                         {
                         TranslatedType::Empty => todo!("Deref to empty type"),
                         TranslatedType::Complex => todo!("Deref to complex type, will need to memcpy to destination"),
-                        TranslatedType::Single(cr_ty) => ReadValue::Single(self.builder.ins().load(cr_ty, flags, ptr, 0)),
+                        TranslatedType::Single(cr_ty) => ReadValue::Single(self.builder.ins().load(cr_ty, flags, ptr, ofs_fixed as i32)),
                         }
                     }
                     else {
@@ -432,7 +476,30 @@ impl Context
                     }
                 },
                 Operation::AssignDeref(local_index, value) => todo!("AssignDeref"),
-                Operation::CreateComposite(local_index, absolute_path, values) => todo!("CreateComposite"),
+                Operation::CreateComposite(local_index, absolute_path, values) => {
+                    let ty = if let Some(path) = absolute_path {
+                        crate::ast::ty::Type::new_path_resolved(crate::Span::new_null(), crate::ast::path::TypeBinding::Struct(path.clone()))
+                    }
+                    else {
+                        todo!("CreateComposite - tuple")
+                    };
+                    let ti = out_state.outer_state.type_info(&ty);
+                    if ti.is_primitive_like() {
+                        todo!("CreateComposite - {ty:?}")
+                    }
+                    else {
+                        let VariableValue::StackSlot(ss) = out_state.variables[local_index.0] else { todo!("CreateComposite to non SS"); };
+                        let f = ti.as_composite().unwrap();
+                        for (value, fld) in Iterator::zip(values.iter(), f.iter()) {
+                            let value = out_state.read_value(value);
+                            match value {
+                            ReadValue::Empty => {},
+                            ReadValue::Single(value) => { out_state.builder.ins().stack_store(value, ss, fld.ofs as i32); },
+                            ReadValue::Stack(stack_slot, _, _) => todo!(),
+                            }
+                        }
+                    }
+                },
                 Operation::CreateDataVariant(local_index, absolute_path, _, values) => todo!(),
                 Operation::BinOp(local_index, value_r, bin_op, value_l) => {
                     use ms_ir::BinOp;
@@ -455,7 +522,7 @@ impl Context
                 },
                 Operation::UniOp(local_index, uni_op, value) => todo!(),
                 Operation::BitShift(local_index, value, bit_shift, value1) => todo!(),
-                Operation::BorrowLocal(local_index, _, local_index1, wrapper_list) => todo!(),
+                Operation::BorrowLocal(local_index, _, local_index1, wrapper_list) => todo!("BorrowLocal"),
                 Operation::BorrowGlobal(local_index, _, absolute_path, wrapper_list) => todo!(),
                 Operation::PointerOffset(local_index, _, local_index1, wrapper_list) => todo!(),
                 }
