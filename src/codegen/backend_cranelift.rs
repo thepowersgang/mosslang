@@ -45,7 +45,8 @@ impl Context
         let indirect_return;
         let sig = {
             let mut sig = cr_ir::Signature::new(cranelift_codegen::isa::CallConv::SystemV);
-            indirect_return = !state.type_info(ret).is_primitive_like();
+            let ret_ti = state.type_info(ret);
+            indirect_return = !ret_ti.is_primitive_like() && ret_ti.size() > 0;
             if indirect_return {
                 sig.params.push(AbiParam::new(self.ptr_ty()));
             }
@@ -490,7 +491,20 @@ impl Context
                     },
                     }
                 },
-                Operation::AssignDeref(local_index, value) => todo!("AssignDeref"),
+                Operation::AssignDeref(dst_ptr, value) => {
+                    let ptr = out_state.read_value_single(&ms_ir::Value::Local(*dst_ptr, Default::default()));
+                    let value = out_state.read_value(value);
+                    let flags = cr_ir::MemFlags::new();
+                    match value {
+                    ReadValue::Empty => {},
+                    ReadValue::Single(value) => {
+                        out_state.builder.ins().store(flags, value, ptr, 0);
+                    },
+                    ReadValue::Stack(src_ss, ty, src_ofs) => {
+                        todo!("AssignDeref - StackSlot value");
+                        }
+                    }
+                },
                 Operation::CreateComposite(local_index, absolute_path, values) => {
                     let ty = if let Some(path) = absolute_path {
                         crate::ast::ty::Type::new_path_resolved(crate::Span::new_null(), crate::ast::path::TypeBinding::Struct(path.clone()))
@@ -523,6 +537,20 @@ impl Context
                     let v = match ir.locals[local_index.0].kind {
                         TypeKind::Integer(_) => match bin_op {
                             BinOp::Add => out_state.builder.ins().iadd(x, y),
+                            BinOp::Sub => out_state.builder.ins().isub(x, y),
+                            BinOp::Mul => out_state.builder.ins().imul(x, y),
+                            BinOp::Div => todo!(),
+                            BinOp::Rem => todo!(),
+                            BinOp::BitOr => todo!(),
+                            BinOp::BitAnd => todo!(),
+                            BinOp::BitXor => todo!(),
+                        },
+                        TypeKind::Pointer { is_const: _, ref inner } => match bin_op {
+                            BinOp::Add => {
+                                let ti = out_state.outer_state.type_info(&inner);
+                                let y = out_state.builder.ins().imul_imm(y, ti.size() as i64);
+                                out_state.builder.ins().iadd(x, y)
+                            },
                             BinOp::Sub => todo!(),
                             BinOp::Mul => todo!(),
                             BinOp::Div => todo!(),
@@ -572,7 +600,7 @@ impl Context
             },
             Terminator::Return(value) => {
                 if let Some(return_ptr) = return_ptr {
-                    todo!("Return large object");
+                    todo!("Return large object - return pointer set");
                 }
                 else {
                     let v = out_state.read_value(value);
