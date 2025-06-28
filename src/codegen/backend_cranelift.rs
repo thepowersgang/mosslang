@@ -30,7 +30,7 @@ impl Context
 			};
         let builder = ::cranelift_object::ObjectBuilder::new(
 				isa,
-				b"unknown_object.o"[..].to_owned(),
+				output_path.file_name().unwrap().as_encoded_bytes().to_owned(),//b"unknown_object.o"[..].to_owned(),
 				::cranelift_module::default_libcall_names(),
 				).expect("Can't create object builder");
         Context {
@@ -96,17 +96,16 @@ impl Context
             //Multiple,
         }
         impl ReadValue {
-            fn unwrap_single(self) -> cr_ir::Value {
-                match self {
-                ReadValue::Empty => panic!("Expected a single-register value, got empty"),
-                ReadValue::Stack(_, _, _) => panic!("Expected a single-register value, got a stack slot"),
-                ReadValue::Single(value) => value,
-                }
-            }
-            fn into_iter(self) -> impl Iterator<Item=cr_ir::Value> {
+            fn into_iter(self, state: &mut State) -> impl Iterator<Item=cr_ir::Value> {
                 match self {
                 ReadValue::Empty => None,
-                ReadValue::Stack(_, _, _) => panic!("into_iter for stack slot"),
+                ReadValue::Stack(ss, ty, ofs) => {
+                    match get_types(&ty) {
+                    TranslatedType::Empty => None,
+                    TranslatedType::Single(ty) => Some( state.builder.ins().stack_load(ty, ss, ofs as i32) ),
+                    TranslatedType::Complex => todo!("into_iter for stack slot - non-trivial: {}", ty),
+                    }
+                },
                 ReadValue::Single(value) => Some(value),
                 }.into_iter()
             }
@@ -287,6 +286,22 @@ impl Context
                 Value::FunctionPointer(absolute_path, function_pointer_ty) => todo!(),
                 }
             }
+            /// Read a trivial value (must fit into a register), helper for number ops
+            fn read_value_single(&mut self, value: &ms_ir::Value) -> cr_ir::Value {
+                match self.read_value(value)
+                {
+                ReadValue::Empty => panic!("Expected a register-sized value, but got a zero-sized value: {:?}", value),
+                ReadValue::Single(value) => value,
+                ReadValue::Stack(ss, ty, ofs) => {
+                    match get_types(&ty)
+                    {
+                    TranslatedType::Empty => panic!("Expected a register-sized value, but got a zero-sized value: {:?}: {}", value, ty),
+                    TranslatedType::Single(cr_ty) => self.builder.ins().stack_load(cr_ty, ss, ofs as i32),
+                    TranslatedType::Complex => todo!("Complex type from `read_value_single`? {}", ty),
+                    }
+                    }
+                }
+            }
 
             /// Store a read cranelift value into the specified local
             fn store_value(&mut self, local_index: &ms_ir::LocalIndex, value: cr_ir::Value) {
@@ -303,13 +318,13 @@ impl Context
                 (
                     cr_ir::Block::from_u32(block.index as u32),
                     block.args.iter()
-                        .flat_map(|l| self.read_value(&ms_ir::Value::Local(*l, Default::default())).into_iter())
+                        .flat_map(|l| self.read_value(&ms_ir::Value::Local(*l, Default::default())).into_iter(self))
                         .collect::<Vec<_>>()
                 )
             }
             fn get_val_list(&mut self, values: &[ms_ir::Value]) -> Vec<cr_ir::Value> {
                 values.iter()
-                    .flat_map(|l| self.read_value(l).into_iter())
+                    .flat_map(|l| self.read_value(l).into_iter(self))
                     .collect::<Vec<_>>()
             }
 
@@ -503,8 +518,8 @@ impl Context
                 Operation::CreateDataVariant(local_index, absolute_path, _, values) => todo!(),
                 Operation::BinOp(local_index, value_r, bin_op, value_l) => {
                     use ms_ir::BinOp;
-                    let x = out_state.read_value(value_l).unwrap_single();
-                    let y = out_state.read_value(value_r).unwrap_single();
+                    let x = out_state.read_value_single(value_l);
+                    let y = out_state.read_value_single(value_r);
                     let v = match ir.locals[local_index.0].kind {
                         TypeKind::Integer(_) => match bin_op {
                             BinOp::Add => out_state.builder.ins().iadd(x, y),
@@ -522,9 +537,28 @@ impl Context
                 },
                 Operation::UniOp(local_index, uni_op, value) => todo!(),
                 Operation::BitShift(local_index, value, bit_shift, value1) => todo!(),
-                Operation::BorrowLocal(local_index, _, local_index1, wrapper_list) => todo!("BorrowLocal"),
-                Operation::BorrowGlobal(local_index, _, absolute_path, wrapper_list) => todo!(),
-                Operation::PointerOffset(local_index, _, local_index1, wrapper_list) => todo!(),
+                Operation::BorrowLocal(local_index, _, slot, wrapper_list) => {
+                    let VariableValue::StackSlot(ss) = out_state.variables[slot.0] else { panic!("BorrowLocal not of a slot - {:?}", out_state.variables[slot.0]); };
+                    let (dyn_ofs, ofs, ty) = out_state.get_offset_from_wrappers(&ir.locals[slot.0], wrapper_list);
+                    let ptr_val = out_state.builder.ins().stack_addr(out_state.ctxt.ptr_ty(), ss, ofs as i32);
+                    let ptr_val = match dyn_ofs {
+                        None => ptr_val,
+                        Some(dyn_ofs) => out_state.builder.ins().iadd(ptr_val, dyn_ofs),
+                    };
+                    out_state.store_value(local_index, ptr_val);
+                },
+                Operation::BorrowGlobal(dst, _, absolute_path, wrapper_list) => todo!(),
+                Operation::PointerOffset(dst, _, other_ptr, wrappers) => {
+                    let TypeKind::Pointer { is_const: _, inner: ref ty } = out_state.ir.locals[other_ptr.0].kind else { panic!("PointerOffset on non-pointer") };
+                    let (dyn_ofs, ofs, _) = out_state.get_offset_from_wrappers(ty, wrappers);
+                    let value = out_state.read_value_single(&ms_ir::Value::Local(*other_ptr, Default::default()));
+                    let value = out_state.builder.ins().iadd_imm(value, ofs as i64);
+                    let value = match dyn_ofs {
+                        None => value,
+                        Some(dyn_ofs) => out_state.builder.ins().iadd(value, dyn_ofs),
+                    };
+                    out_state.store_value(dst, value);
+                },
                 }
             }
 
@@ -542,7 +576,8 @@ impl Context
                 }
                 else {
                     let v = out_state.read_value(value);
-                    out_state.builder.ins().return_(&v.into_iter().collect::<Vec<_>>());
+                    let vals = v.into_iter(&mut out_state).collect::<Vec<_>>();
+                    out_state.builder.ins().return_(&vals);
                 }
             },
             Terminator::Compare { lhs, op, rhs, if_true, if_false } => {
@@ -556,8 +591,8 @@ impl Context
                     CmpOp::Gt => todo!(),
                     CmpOp::Ge => todo!(),
                 };
-                let x = out_state.read_value(lhs).unwrap_single();
-                let y = out_state.read_value(rhs).unwrap_single();
+                let x = out_state.read_value_single(lhs);
+                let y = out_state.read_value_single(rhs);
                 let cnd = out_state.builder.ins().icmp(cnd, x, y);
                 let (then_label, then_args) = out_state.get_jump(if_true);
                 let (else_label, else_args) = out_state.get_jump(if_false);

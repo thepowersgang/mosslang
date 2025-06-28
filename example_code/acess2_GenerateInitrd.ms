@@ -228,7 +228,7 @@ fn ProcessDir(lex: *mut Lexer, os: *mut OutState, inode: u32, end: Token)
 
 	fprintf(os.*.out_c, "tInitRD_File INITRD_%u_entries[] = {", inode);
 	for i in 0 .. dents.num_ents {
-		fprintf(os.*.out_c, "{\"%s\",&INITRD_%u}, ", dents.ents[i].*.name, dents.ents[i].*.inode);
+		fprintf(os.*.out_c, "{\"%s\",&INITRD_%u}, ", &dents.ents[i].*.name, dents.ents[i].*.inode);
 		free(dents.ents[i]);
 	}
 	free(dents.ents);
