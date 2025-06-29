@@ -321,7 +321,7 @@ fn AddFile(os: *mut OutState, dents: *mut DirEnts, is_opt: bool, name: *const c_
 fn expand_path(out: *mut c_STR, src: *const c_STR) -> usize {
 	let rv = 0;
 	
-	while *src != 0 {
+	while src[0] != 0 {
 		if src[0] == '_' && src[1] == '_' {
 			let ARCHDIR = getenv("ARCH");
 			if strncmp(src, "__EXT__", 4+3) == 0 {

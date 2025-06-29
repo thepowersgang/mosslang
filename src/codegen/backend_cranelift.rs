@@ -246,22 +246,17 @@ impl Context
                         VariableValue::StackSlot(_) => todo!("Load a pointer from a stack slot (why did a pointer end up assigned an alloca?)"),
                         VariableValue::Value(value) => value,
                         };
-                    if !wrappers.is_empty() {
-                        let (ofs_dyn, ofs_fixed, ty) = self.get_offset_from_wrappers(&val_ty, wrappers);
-                        let ptr = if let Some(ofs) = ofs_dyn { self.builder.ins().iadd(ptr, ofs) } else { ptr };
-                        let mut flags = cr_ir::MemFlags::new();
-                        if false {
-                            flags.set_notrap();
-                        }
-                        match get_types(ty)
-                        {
-                        TranslatedType::Empty => todo!("Deref to empty type"),
-                        TranslatedType::Complex => todo!("Deref to complex type, will need to memcpy to destination"),
-                        TranslatedType::Single(cr_ty) => ReadValue::Single(self.builder.ins().load(cr_ty, flags, ptr, ofs_fixed as i32)),
-                        }
+                    let (ofs_dyn, ofs_fixed, ty) = self.get_offset_from_wrappers(&val_ty, wrappers);
+                    let ptr = if let Some(ofs) = ofs_dyn { self.builder.ins().iadd(ptr, ofs) } else { ptr };
+                    let mut flags = cr_ir::MemFlags::new();
+                    if false {
+                        flags.set_notrap();
                     }
-                    else {
-                        todo!("Read from pointer");
+                    match get_types(ty)
+                    {
+                    TranslatedType::Empty => todo!("Deref to empty type"),
+                    TranslatedType::Complex => todo!("Deref to complex type, will need to memcpy to destination"),
+                    TranslatedType::Single(cr_ty) => ReadValue::Single(self.builder.ins().load(cr_ty, flags, ptr, ofs_fixed as i32)),
                     }
                 },
                 Value::StringLiteral(string_literal) => {
@@ -363,6 +358,10 @@ impl Context
 
         for (i,ty) in ir.locals.iter().enumerate() {
             match ty.kind {
+            TypeKind::Void => {
+                out_state.variables[i] = VariableValue::Empty;
+                //panic!("Unexpected void local _{}", i);
+            },
             TypeKind::Tuple(ref v) if v.is_empty() => {
                 out_state.variables[i] = VariableValue::Empty;
             },
@@ -563,7 +562,18 @@ impl Context
                     };
                     out_state.store_value(local_index, v);
                 },
-                Operation::UniOp(local_index, uni_op, value) => todo!(),
+                Operation::UniOp(local_index, uni_op, value) => {
+                    use ms_ir::UniOp;
+                    let x = out_state.read_value_single(value);
+                    let v = match ir.locals[local_index.0].kind {
+                        TypeKind::Integer(_) => match uni_op {
+                            UniOp::Not => todo!("UniOp - not int"),
+                            UniOp::Neg => out_state.builder.ins().ineg(x),
+                            },
+                        _ => todo!("UniOp on {}", ir.locals[local_index.0]),
+                    };
+                    out_state.store_value(local_index, v);
+                },
                 Operation::BitShift(local_index, value, bit_shift, value1) => todo!(),
                 Operation::BorrowLocal(local_index, _, slot, wrapper_list) => {
                     let VariableValue::StackSlot(ss) = out_state.variables[slot.0] else { panic!("BorrowLocal not of a slot - {:?}", out_state.variables[slot.0]); };
