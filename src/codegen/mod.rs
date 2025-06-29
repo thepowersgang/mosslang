@@ -80,6 +80,7 @@ pub fn generate(output: &::std::path::Path, krate: crate::ast::Crate) -> Result<
     }
     enum_module(&mut state, &krate.module, AbsolutePath(Vec::new()));
     state.visit_module(&krate.module);
+    state.out.finalise()?;
     Ok( () )
 }
 

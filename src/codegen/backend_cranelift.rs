@@ -7,6 +7,7 @@ use std::convert::TryFrom;
 
 pub struct Context
 {
+    ofp: ::std::fs::File,
     module: ::cranelift_object::ObjectModule,
     functions: ::std::collections::HashMap<AbsolutePath, (cr_ir::UserFuncName, DeclaredValueItem)>,
     string_count: usize,
@@ -34,10 +35,16 @@ impl Context
 				::cranelift_module::default_libcall_names(),
 				).expect("Can't create object builder");
         Context {
+            ofp: ::std::fs::File::create(output_path).unwrap(),
             module: ::cranelift_object::ObjectModule::new(builder),
             functions: Default::default(),
             string_count: 0,
         }
+    }
+    pub fn finalise(mut self) -> Result<(),::std::io::Error> {
+        use std::io::Write;
+        self.ofp.write_all(&self.module.finish().emit().expect("Error emitting"))?;
+        Ok( () )
     }
 
     /// Forward-declare a function, allowing Cranelift generation to know its signature
@@ -142,16 +149,16 @@ impl Context
                             let crate::ast::ty::TypePath::Resolved(p) = tp else { panic!(); };
                             use crate::ast::path::TypeBinding;
                             match p {
-                            TypeBinding::Alias(absolute_path) => panic!(),
+                            TypeBinding::Alias(_) => panic!("Getting field on type alias? {}", ty),
                             TypeBinding::Union(absolute_path) => todo!(),
                             TypeBinding::Struct(absolute_path) => {
                                 let f = &ti.as_composite().unwrap()[idx];
                                 ofs_fixed += f.ofs;
                                 ty = self.outer_state.field_types[absolute_path][idx];
                             },
-                            TypeBinding::ValueEnum(absolute_path) => todo!(),
+                            TypeBinding::ValueEnum(_) => panic!("Getting field on value enum? {}", ty),
                             TypeBinding::DataEnum(absolute_path) => todo!(),
-                            TypeBinding::EnumVariant(absolute_path, _) => panic!(),
+                            TypeBinding::EnumVariant(_, _) => panic!("Actual type bound to an EnumVariant (only valid for match)"),
                             }
                         }
                         TypeKind::Tuple(inner_tys) => {
@@ -313,14 +320,14 @@ impl Context
                             let crate::ast::ty::TypePath::Resolved(p) = tp else { panic!(); };
                             use crate::ast::path::TypeBinding;
                             match p {
-                            TypeBinding::Alias(absolute_path) => panic!(),
+                            TypeBinding::Alias(_) => panic!("Field on type alias"),
                             TypeBinding::Union(absolute_path) => todo!(),
                             TypeBinding::Struct(absolute_path) => {
                                 ty = self.outer_state.field_types[absolute_path][idx];
                             },
-                            TypeBinding::ValueEnum(absolute_path) => todo!(),
+                            TypeBinding::ValueEnum(_) => panic!("Field on value enum?"),
                             TypeBinding::DataEnum(absolute_path) => todo!(),
-                            TypeBinding::EnumVariant(absolute_path, _) => panic!(),
+                            TypeBinding::EnumVariant(_, _) => panic!("Bound to enum variant?"),
                             }
                         }
                         TypeKind::Tuple(inner_tys) => {
@@ -329,7 +336,7 @@ impl Context
                         _ => todo!("Get field offset for {ty} #{}", idx),
                         }
                     },
-                    Wrapper::IndexBySlot(local_index) => {
+                    Wrapper::IndexBySlot(_) => {
                         let (TypeKind::Array { inner, count: _ } | TypeKind::UnsizedArray(inner)) = &ty.kind else {
                             panic!("Indexing on invalid type: {}", ty);
                         };
@@ -730,10 +737,10 @@ impl Context
                     (CmpOp::Ne, _) => IntCC::NotEqual,
                     (CmpOp::Lt, Some(true )) => IntCC::SignedLessThan,
                     (CmpOp::Lt, Some(false)) => IntCC::UnsignedLessThan,
-                    (CmpOp::Lt, _) => todo!(),
                     (CmpOp::Le, _) => todo!(),
                     (CmpOp::Gt, _) => todo!(),
                     (CmpOp::Ge, _) => todo!(),
+                    (CmpOp::Lt, None) => panic!("Comparison on non-integer-alike"),
                 };
                 let x = out_state.read_value_single(lhs);
                 let y = out_state.read_value_single(rhs);
@@ -753,7 +760,7 @@ impl Context
                 // TODO: Large return values may end up being an implicit pointer
                 match values {
                 [] => {},
-                [value] => out_state.store_value(dst, values[0]),
+                [value] => out_state.store_value(dst, *value),
                 [..] => todo!("Multiple returns?"),
                 }
 
