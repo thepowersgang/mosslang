@@ -299,6 +299,67 @@ impl Context
                 }
             }
 
+            fn get_ty_from_wrappers<'out>(&'out self, mut ty: &'out crate::ast::Type, wrapper_list: &ms_ir::WrapperList) -> &'out crate::ast::Type
+            {
+                for w in wrapper_list.iter() {
+                    use ms_ir::Wrapper;
+                    match w {
+                    Wrapper::Field(idx) => {
+                        match &ty.kind {
+                        TypeKind::Array { inner, count: _ } | TypeKind::UnsizedArray(inner) => {
+                            ty = inner;
+                        },
+                        TypeKind::Named(tp) => {
+                            let crate::ast::ty::TypePath::Resolved(p) = tp else { panic!(); };
+                            use crate::ast::path::TypeBinding;
+                            match p {
+                            TypeBinding::Alias(absolute_path) => panic!(),
+                            TypeBinding::Union(absolute_path) => todo!(),
+                            TypeBinding::Struct(absolute_path) => {
+                                ty = self.outer_state.field_types[absolute_path][idx];
+                            },
+                            TypeBinding::ValueEnum(absolute_path) => todo!(),
+                            TypeBinding::DataEnum(absolute_path) => todo!(),
+                            TypeBinding::EnumVariant(absolute_path, _) => panic!(),
+                            }
+                        }
+                        TypeKind::Tuple(inner_tys) => {
+                            ty = &inner_tys[idx];
+                        },
+                        _ => todo!("Get field offset for {ty} #{}", idx),
+                        }
+                    },
+                    Wrapper::IndexBySlot(local_index) => {
+                        let (TypeKind::Array { inner, count: _ } | TypeKind::UnsizedArray(inner)) = &ty.kind else {
+                            panic!("Indexing on invalid type: {}", ty);
+                        };
+                        ty = inner;
+                        }
+                    }
+                }
+                ty
+            }
+            fn value_type(&self, value: &ms_ir::Value) -> Option<&crate::ast::Type> {
+                match value {
+                ms_ir::Value::Unreachable => None,
+                ms_ir::Value::ImplicitUnit => todo!("Get type of unit - why is this being compared? (only place where `value_type` is called"),
+                ms_ir::Value::Local(local_index, wrapper_list) => Some(self.get_ty_from_wrappers(&self.ir.locals[local_index.0], wrapper_list)),
+                ms_ir::Value::Named(absolute_path, wrapper_list) => {
+                    let Some(ty) = self.outer_state.statics.get(absolute_path) else { panic!("Undefined static {}", absolute_path) };
+                    Some(self.get_ty_from_wrappers(ty, wrapper_list))
+                },
+                ms_ir::Value::Deref { ptr, wrappers } => {
+                    let TypeKind::Pointer { is_const: _, inner: ref val_ty } = self.ir.locals[ptr.0].kind else {
+                        panic!("Deref on non-pointer: {ptr:?} - {ty}", ty=self.ir.locals[ptr.0]);
+                    };
+                    Some(self.get_ty_from_wrappers(val_ty, wrappers))
+                },
+                ms_ir::Value::StringLiteral(_) => todo!("Get type of StringLiteral - why are you comparing with a string literal? (only place where `value_type` is called)"),
+                ms_ir::Value::IntegerLiteral(_) => None,
+                ms_ir::Value::FunctionPointer(_absolute_path, _) => None,//todo!(),
+                }
+            }
+
             /// Store a read cranelift value into the specified local
             fn store_value(&mut self, local_index: &ms_ir::LocalIndex, value: cr_ir::Value) {
                 if let VariableValue::StackSlot(ss) = self.variables[local_index.0] {
@@ -609,25 +670,70 @@ impl Context
                 out_state.builder.ins().jump(call_label, &call_args);
             },
             Terminator::Return(value) => {
+                let value = out_state.read_value(value);
                 if let Some(return_ptr) = return_ptr {
-                    todo!("Return large object - return pointer set");
+                    let flags = cr_ir::MemFlags::new()
+                        .with_checked()
+                        .with_aligned()
+                        .with_notrap()
+                        ;
+                    match value {
+                    ReadValue::Empty => todo!(),
+                    ReadValue::Single(value) => {
+                        out_state.builder.ins().store(flags, value, return_ptr, 0);
+                        },
+                    ReadValue::Stack(src_ss, src_ty, src_ofs) => {
+                            let ti = out_state.outer_state.type_info(&src_ty);
+                            // TODO: respect alignment (do byte loads if alignment is `<4`)
+                            // TODO: only do the below if the type isn't a primtive (e.g. borrowed)
+                            for i in 0 .. ti.size() / 4 {
+                                let value = out_state.builder.ins().stack_load(cr_ir::types::I32, src_ss, (src_ofs + i * 4) as i32);
+                                out_state.builder.ins().store(flags, value, return_ptr, (i * 4) as i32);
+                            }
+                            let ofs = ti.size() - ti.size() % 4;
+                            for i in 0 .. ti.size() % 4 {
+                                let value = out_state.builder.ins().stack_load(cr_ir::types::I8, src_ss, (src_ofs + ofs + i) as i32);
+                                out_state.builder.ins().store(flags, value, return_ptr, (ofs + i) as i32);
+                            }
+                        },
+                    }
                 }
                 else {
-                    let v = out_state.read_value(value);
-                    let vals = v.into_iter(&mut out_state).collect::<Vec<_>>();
+                    let vals = value.into_iter(&mut out_state).collect::<Vec<_>>();
                     out_state.builder.ins().return_(&vals);
                 }
             },
             Terminator::Compare { lhs, op, rhs, if_true, if_false } => {
                 use ms_ir::CmpOp;
                 use cr_ir::condcodes::IntCC;
-                let cnd = match op {
-                    CmpOp::Eq => IntCC::Equal,
-                    CmpOp::Ne => IntCC::NotEqual,
-                    CmpOp::Lt => todo!(),
-                    CmpOp::Le => todo!(),
-                    CmpOp::Gt => todo!(),
-                    CmpOp::Ge => todo!(),
+                let ty = match (out_state.value_type(lhs), out_state.value_type(rhs))
+                    {
+                    (Some(t), _) => Some(t),
+                    (_, Some(t)) => Some(t),
+                    _ => None,
+                    };
+                let is_signed = match ty.map(|v| &v.kind)
+                    {
+                    None => None,
+                    Some(TypeKind::Integer(ik)) => Some(match ik
+                        {
+                        crate::ast::ty::IntClass::Unsigned(_)
+                        | crate::ast::ty::IntClass::PtrInt => false,
+                        crate::ast::ty::IntClass::Signed(_)
+                        | crate::ast::ty::IntClass::PtrDiff => false,
+                        }),
+                    Some(TypeKind::Pointer { .. }) => Some(false),
+                    Some(_) => None,
+                    };
+                let cnd = match (op,is_signed) {
+                    (CmpOp::Eq, _) => IntCC::Equal,
+                    (CmpOp::Ne, _) => IntCC::NotEqual,
+                    (CmpOp::Lt, Some(true )) => IntCC::SignedLessThan,
+                    (CmpOp::Lt, Some(false)) => IntCC::UnsignedLessThan,
+                    (CmpOp::Lt, _) => todo!(),
+                    (CmpOp::Le, _) => todo!(),
+                    (CmpOp::Gt, _) => todo!(),
+                    (CmpOp::Ge, _) => todo!(),
                 };
                 let x = out_state.read_value_single(lhs);
                 let y = out_state.read_value_single(rhs);
