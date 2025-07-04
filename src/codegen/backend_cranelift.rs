@@ -737,9 +737,9 @@ impl<'ir, 'a, 'a1> State<'ir, 'a, 'a1> {
             let gv = self.ctxt.module.declare_data_in_func(did, self.builder.func);
             ReadValue::Single(self.builder.ins().symbol_value( self.ctxt.ptr_ty(), gv ))
         },
-        Value::IntegerLiteral(value) =>
+        Value::IntegerLiteral(value, int_cls) =>
             match u64::try_from(*value) {
-            Ok(v) => ReadValue::Single(self.builder.ins().iconst(cr_ir::Type::int(64).unwrap(), v as i64)),
+            Ok(v) => ReadValue::Single(self.builder.ins().iconst(get_int_ty(int_cls), v as i64)),
             Err(_) => todo!("big integer literal"),
             },
         Value::FunctionPointer(absolute_path, function_pointer_ty) => todo!(),
@@ -818,7 +818,21 @@ impl<'ir, 'a, 'a1> State<'ir, 'a, 'a1> {
             Some(self.get_ty_from_wrappers(val_ty, wrappers))
         },
         ms_ir::Value::StringLiteral(_) => todo!("Get type of StringLiteral - why are you comparing with a string literal? (only place where `value_type` is called)"),
-        ms_ir::Value::IntegerLiteral(_) => None,
+        ms_ir::Value::IntegerLiteral(_, int_cls) => {
+            use crate::ast::ty::{Type,IntClass};
+            const fn make_ty(ic: crate::ast::ty::IntClass) -> Type {
+                Type { kind: crate::ast::ty::TypeKind::Integer(ic), span: crate::Span::new_null() }
+            }
+            match int_cls
+            {
+            IntClass::PtrInt  => { static T: Type = make_ty(IntClass::PtrInt); Some(&T) },
+            IntClass::PtrDiff => { static T: Type = make_ty(IntClass::PtrDiff); Some(&T) },
+            IntClass::Signed(0) => { static T: Type = make_ty(IntClass::Signed(0)); Some(&T) },
+            IntClass::Signed(1) => { static T: Type = make_ty(IntClass::Signed(1)); Some(&T) },
+            IntClass::Signed(_) => todo!(),
+            IntClass::Unsigned(_) => todo!(),
+            }
+            },
         ms_ir::Value::FunctionPointer(_absolute_path, _) => None,//todo!(),
         }
     }
@@ -877,28 +891,32 @@ enum TranslatedType {
     Single(cr_ir::Type),
     Complex,
 }
-fn get_types(ty: &crate::ast::Type) -> TranslatedType {
+fn get_int_ty(int_class: &crate::ast::ty::IntClass) -> cr_ir::Type {
     use cr_ir::types as t;
     use crate::ast::ty::IntClass;
+    match int_class
+    {
+    IntClass::PtrInt|IntClass::PtrDiff => t::I64,
+    IntClass::Signed(shift)|IntClass::Unsigned(shift) => match shift
+        {
+        0 => t::I8,
+        1 => t::I16,
+        2 => t::I32,
+        3 => t::I64,
+        4 => t::I128,
+        _ => panic!("Too-large integer type"),
+        },
+    }
+}
+fn get_types(ty: &crate::ast::Type) -> TranslatedType {
+    use cr_ir::types as t;
     let ptr = t::I64;
     match &ty.kind {
     TypeKind::Infer { .. } | TypeKind::TypeOf(..) => panic!("Unexpanded {:?}", ty),
     TypeKind::Void | TypeKind::UnsizedArray(..) => panic!("Unexpected {:?}", ty),
 
     TypeKind::Bool => TranslatedType::Single(t::I8),
-    TypeKind::Integer(int_class) => TranslatedType::Single(match int_class
-        {
-        IntClass::PtrInt|IntClass::PtrDiff => ptr,
-        IntClass::Signed(shift)|IntClass::Unsigned(shift) => match shift
-            {
-            0 => t::I8,
-            1 => t::I16,
-            2 => t::I32,
-            3 => t::I64,
-            4 => t::I128,
-            _ => panic!("Too-large integer type"),
-            },
-        }),
+    TypeKind::Integer(int_class) => TranslatedType::Single(get_int_ty(int_class)),
     TypeKind::Tuple(items) => match &items[..]
         {
         [] => TranslatedType::Empty,

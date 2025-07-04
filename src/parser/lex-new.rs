@@ -41,7 +41,7 @@ impl ::std::fmt::Display for Ident {
 pub struct RawLexer
 {
     source: ::utf8reader::UTF8Reader< ::std::io::BufReader< ::std::fs::File> >,
-    path: ::std::rc::Rc<::std::path::Path>,
+    path: ::std::sync::Arc<::std::path::Path>,
     cur_char: Option<char>,
     cur_line: usize,
     cur_ofs: usize,
@@ -52,7 +52,7 @@ pub struct RawLexer
 #[derive(Clone,Debug)]
 pub struct PointSpan
 {
-    path: ::std::rc::Rc<::std::path::Path>,
+    path: ::std::sync::Arc<::std::path::Path>,
     line: usize,
     ofs: usize,
 }
@@ -65,7 +65,7 @@ impl ::std::fmt::Display for PointSpan {
 #[derive(Clone,Debug)]
 pub struct Span
 {
-    path: ::std::rc::Rc<::std::path::Path>,
+    path: Option<::std::sync::Arc<::std::path::Path>>,
     line: usize,
     ofs: usize,
     end_line: usize,
@@ -74,13 +74,13 @@ pub struct Span
 impl Span
 {
     /// Create a span indicating that the item
-    pub fn new_null() -> Self {
+    pub const fn new_null() -> Self {
         //static NULL_PATH: ::std::sync::OnceLock<::std::rc::Rc<::std::path::Path>> = ::std::sync::OnceLock::new();
-        Span { path: ::std::rc::Rc::from(::std::path::Path::new("")), line: 0, ofs: 0, end_line: 0, end_ofs: 0 }
+        Span { path: None, line: 0, ofs: 0, end_line: 0, end_ofs: 0 }
     }
     pub(super) fn new(start: PointSpan, end: PointSpan) -> Self {
         Span {
-            path: start.path,
+            path: Some(start.path),
             line: start.line,
             ofs: start.ofs,
             end_line: end.line,
@@ -90,14 +90,16 @@ impl Span
 }
 impl ::std::fmt::Display for Span {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if &*self.path == ::std::path::Path::new("") {
-            write!(f, "NULL: ")
+        match self.path {
+        None => write!(f, "NULL: "),
+        Some(ref path) => {
+            if self.line == self.end_line {
+                write!(f, "{}:{}:{}-{}: ", path.display(), self.line, self.ofs, self.end_ofs)
+            }
+            else {
+                write!(f, "{}:{}:{}-{}:{}: ", path.display(), self.line, self.ofs, self.end_line,self.end_ofs)
+            }
         }
-        else if self.line == self.end_line {
-            write!(f, "{}:{}:{}-{}: ", self.path.display(), self.line, self.ofs, self.end_ofs)
-        }
-        else {
-            write!(f, "{}:{}:{}-{}:{}: ", self.path.display(), self.line, self.ofs, self.end_line,self.end_ofs)
         }
     }
 }
@@ -108,7 +110,7 @@ impl RawLexer
         let fp = ::std::io::BufReader::new(::std::fs::File::open(path)?);
         let mut source = ::utf8reader::UTF8Reader::new(fp);
         Ok(RawLexer {
-            path: ::std::rc::Rc::from(path),
+            path: ::std::sync::Arc::from(path),
             cur_char: source.next().transpose()?,
             cur_line: 1,
             cur_ofs: 0,

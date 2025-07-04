@@ -170,7 +170,7 @@ pub fn visit_value<V: ?Sized + Visitor>(visitor: &mut V, addr: Addr, v: &super::
     Value::Unreachable => {},
     Value::ImplicitUnit => {},
     Value::StringLiteral(_) => {},
-    Value::IntegerLiteral(_) => {},
+    Value::IntegerLiteral(..) => {},
     Value::FunctionPointer(_,_) => {},
 
     Value::Local(local_index, wrapper_list) => {
@@ -346,7 +346,7 @@ pub fn visit_value_mut<V: ?Sized + VisitorMut>(visitor: &mut V, addr: Addr, v: &
     Value::Unreachable => {},
     Value::ImplicitUnit => {},
     Value::StringLiteral(_) => {},
-    Value::IntegerLiteral(_) => {},
+    Value::IntegerLiteral(..) => {},
     Value::FunctionPointer(_,_) => {},
 
     Value::Local(local_index, wrapper_list) => {

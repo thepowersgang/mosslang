@@ -27,7 +27,7 @@ pub enum Value {
     /// String literal
     StringLiteral(crate::ast::StringLiteral),
     /// An integer literal
-    IntegerLiteral(u128, ),
+    IntegerLiteral(u128, crate::ast::ty::IntClass),
     /// A pointer to a function (could be a real function, or it could be a struct constructor, or an enum variant constructor)
     FunctionPointer(AbsolutePath, FunctionPointerTy),
 }

@@ -65,9 +65,21 @@ impl<'a,'b> Visitor<'a,'b> {
         },
 
         ExprKind::LiteralString(data) => super::Value::StringLiteral(data.clone()),
-        ExprKind::LiteralInteger(v, _int_lit_class) => super::Value::IntegerLiteral(*v),
+        ExprKind::LiteralInteger(v, cls) => {
+            let cls = match cls
+                {
+                crate::ast::expr::IntLitClass::Unspecified => match expr.data_ty.kind
+                    {
+                    crate::ast::ty::TypeKind::Integer(cls) => cls,
+                    _ => todo!("Unspecified integer type? {}", expr.data_ty),
+                    },
+                crate::ast::expr::IntLitClass::Pointer => crate::ast::ty::IntClass::PtrInt,
+                crate::ast::expr::IntLitClass::Integer(int_class) => *int_class,
+                };
+            super::Value::IntegerLiteral(*v, cls)
+            },
         ExprKind::TypeInfoSizeOf(ty) => {
-            super::Value::IntegerLiteral( self.parent.type_info(ty).size() as u128 )
+            super::Value::IntegerLiteral( self.parent.type_info(ty).size() as u128, crate::ast::ty::IntClass::PtrInt )
         },
 
         ExprKind::Return(expr) => {
@@ -116,7 +128,7 @@ impl<'a,'b> Visitor<'a,'b> {
             match v_slot {
             Value::Unreachable => Value::Unreachable,
             Value::StringLiteral(_)
-            |Value::IntegerLiteral(_)
+            |Value::IntegerLiteral(_, _)
             |Value::FunctionPointer(..) => panic!("Type error: Assigning to literal"),
             Value::ImplicitUnit => panic!("Type error: Assigning to unit"),
             Value::Local(local_index, wrapper_list) => {
@@ -161,7 +173,7 @@ impl<'a,'b> Visitor<'a,'b> {
             },
             ValueBinding::ValueEnumVariant(_absolute_path, idx) => {
                 // HACK: Assume that the variant isn't a data-holding variant
-                Value::IntegerLiteral(*idx as _)
+                Value::IntegerLiteral(*idx as _, crate::ast::ty::IntClass::Unsigned(2))
                 },
             ValueBinding::Function(absolute_path) => Value::FunctionPointer(absolute_path.clone(), super::FunctionPointerTy::Function),
             ValueBinding::DataEnumVariant(absolute_path, idx) => Value::FunctionPointer(absolute_path.clone(), super::FunctionPointerTy::DataEnum(*idx)),
@@ -198,7 +210,7 @@ impl<'a,'b> Visitor<'a,'b> {
                 Value::Unreachable => return Value::Unreachable,
                 Value::ImplicitUnit => panic!("{}: Unexpected CallValue on unit", expr.span),
                 Value::StringLiteral(_) => panic!("{}: Unexpected CallValue on string", expr.span),
-                Value::IntegerLiteral(_) => panic!("{}: Unexpected CallValue on an integer", expr.span),
+                Value::IntegerLiteral(..) => panic!("{}: Unexpected CallValue on an integer", expr.span),
                 Value::FunctionPointer(absolute_path, ty) => {
                     match ty
                     {
@@ -282,7 +294,7 @@ impl<'a,'b> Visitor<'a,'b> {
                 Value::ImplicitUnit => panic!("Type error: Indexing by unit"),
                 Value::StringLiteral(_) => panic!("Type error: Indexing by String"),
                 Value::FunctionPointer(..) => panic!("Type error: Indexing by function pointer"),
-                Value::IntegerLiteral(i) => Some(super::Wrapper::Field(i as usize)),
+                Value::IntegerLiteral(i, _) => Some(super::Wrapper::Field(i as usize)),
                 Value::Local(idx, wrappers) if wrappers.is_empty() =>
                     Some(super::Wrapper::IndexBySlot(idx)),
                 Value::Local(..) | Value::Named(..) | Value::Deref { .. } => {
@@ -295,7 +307,7 @@ impl<'a,'b> Visitor<'a,'b> {
             (Value::Unreachable,_) => Value::Unreachable,
             (_,None) => Value::Unreachable,
             (Value::ImplicitUnit     ,_) => panic!("Type error: Indexing a unit"),
-            (Value::IntegerLiteral(_),_) => panic!("Type error: Indexing an integer"),
+            (Value::IntegerLiteral(..),_) => panic!("Type error: Indexing an integer"),
             (Value::FunctionPointer(..),_) => panic!("Type error: Indexing a function pointer"),
 
             (Value::StringLiteral(_),_) => todo!("Indexing a string?"),
@@ -335,7 +347,7 @@ impl<'a,'b> Visitor<'a,'b> {
             },
             
             Value::StringLiteral(_)
-            | Value::IntegerLiteral(_)
+            | Value::IntegerLiteral(..)
             | Value::FunctionPointer(..) => {
                 let tmp = self.output.allocate_slot(&val_expr.data_ty);
                 self.output.push_stmt(Operation::AssignLocal(tmp, v));
@@ -350,7 +362,7 @@ impl<'a,'b> Visitor<'a,'b> {
             match v {
             Value::Unreachable => Value::Unreachable,
             Value::StringLiteral(_) => panic!("Deref of string literal?"),
-            Value::IntegerLiteral(_) => panic!("Type error: Deref of integer"),
+            Value::IntegerLiteral(..) => panic!("Type error: Deref of integer"),
             Value::FunctionPointer(..) => panic!("Type error: Deref of function pointer"),
             Value::ImplicitUnit => panic!("Type error: Deref of unit"),
             Value::Local(local_index, wrapper_list) if wrapper_list.is_empty() => {
@@ -432,11 +444,11 @@ impl<'a,'b> Visitor<'a,'b> {
                 this.output.end_block(Terminator::Compare { lhs: v_l, op, rhs: v_r, if_true: bb_true.into(), if_false: bb_false.into() });
             
                 this.output.start_block(bb_true);
-                this.output.push_stmt(Operation::AssignLocal(rv, Value::IntegerLiteral(1)));
+                this.output.push_stmt(Operation::AssignLocal(rv, Value::IntegerLiteral(1, crate::ast::ty::IntClass::Unsigned(0))));
                 this.output.end_block(Terminator::Goto(bb_exit.into()));
             
                 this.output.start_block(bb_false);
-                this.output.push_stmt(Operation::AssignLocal(rv, Value::IntegerLiteral(0)));
+                this.output.push_stmt(Operation::AssignLocal(rv, Value::IntegerLiteral(0, crate::ast::ty::IntClass::Unsigned(0))));
                 this.output.end_block(Terminator::Goto(bb_exit.into()));
 
                 this.output.start_block(bb_exit);
@@ -481,11 +493,11 @@ impl<'a,'b> Visitor<'a,'b> {
                 self.apply_if(expr_r, bb_true, bb_false);
                 
                 self.output.start_block(bb_true);
-                self.output.push_stmt(Operation::AssignLocal(rv, Value::IntegerLiteral(1)));
+                self.output.push_stmt(Operation::AssignLocal(rv, Value::IntegerLiteral(1, crate::ast::ty::IntClass::Unsigned(0))));
                 self.output.end_block(Terminator::Goto(bb_exit.into()));
                 
                 self.output.start_block(bb_false);
-                self.output.push_stmt(Operation::AssignLocal(rv, Value::IntegerLiteral(0)));
+                self.output.push_stmt(Operation::AssignLocal(rv, Value::IntegerLiteral(0, crate::ast::ty::IntClass::Unsigned(0))));
                 self.output.end_block(Terminator::Goto(bb_exit.into()));
 
                 self.output.start_block(bb_exit);
@@ -544,6 +556,7 @@ impl<'a,'b> Visitor<'a,'b> {
             Value::Local( break_slot, Default::default() )
         },
         ExprKind::ForLoop { pattern, start, end, body, else_block } => {
+            let crate::ast::ty::TypeKind::Integer(int_ty) = start.data_ty.kind else { panic!() };
             let slot_it_value = self.output.allocate_slot(&start.data_ty);
             let start_value = self.visit_expr(start);
             let end_value = self.visit_expr(end);
@@ -575,7 +588,7 @@ impl<'a,'b> Visitor<'a,'b> {
             self.output.end_block(Terminator::Goto(bb_inc.into()));
 
             self.output.start_block(bb_inc);
-            self.output.push_stmt(Operation::BinOp(slot_it_value, Value::Local(slot_it_value, Default::default() ), super::BinOp::Add, Value::IntegerLiteral(1)));
+            self.output.push_stmt(Operation::BinOp(slot_it_value, Value::Local(slot_it_value, Default::default() ), super::BinOp::Add, Value::IntegerLiteral(1, int_ty)));
             
             self.output.end_block(Terminator::Goto(bb_head.into()));
             let break_slot = self.loop_stack.pop().unwrap().break_slot;
@@ -760,7 +773,7 @@ impl<'a,'b> Visitor<'a,'b> {
         }
         let cond_v = self.visit_expr(expr);
         self.output.end_block(super::Terminator::Compare {
-            lhs: cond_v, op: super::CmpOp::Ne, rhs: super::Value::IntegerLiteral(0),
+            lhs: cond_v, op: super::CmpOp::Ne, rhs: super::Value::IntegerLiteral(0, crate::ast::ty::IntClass::Unsigned(0)),
             if_true: bb_true.into(), if_false: bb_false.into(),
         });
     }
