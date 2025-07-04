@@ -6,6 +6,15 @@ static INTERNER: ::std::sync::Mutex<Option<::string_interner::DefaultStringInter
 #[derive(Clone,Hash)]
 #[derive(PartialOrd,Ord,PartialEq,Eq)]
 pub struct Ident(::string_interner::DefaultSymbol);
+impl Ident {
+    pub fn len(&self) -> usize {
+        match INTERNER.lock().unwrap().get_or_insert_default().resolve(self.0) {
+        Some(v) => v.len(),
+        _ => 0,
+        }
+
+    }
+}
 impl PartialEq<&'_ str> for Ident {
     fn eq(&self, other: &&'_ str) -> bool {
         match INTERNER.lock().unwrap().get_or_insert_default().resolve(self.0) {
