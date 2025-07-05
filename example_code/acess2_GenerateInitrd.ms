@@ -168,6 +168,8 @@ extern "C" fn main(argc: usize, argv: *const [*const c_STR; ...]) -> i32 {
         free(os.dependencies);
         fclose(depfile);
     }
+	
+	0
 }
 
 

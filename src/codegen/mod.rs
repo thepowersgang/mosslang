@@ -46,7 +46,7 @@ pub fn generate(output: &::std::path::Path, krate: crate::ast::Crate) -> Result<
                     match &item.ty {
                     ExternItemType::Function(v) => {
                         #[cfg(feature="cranelift")]
-                        state.out.declare_function(&state.inner, path.append(item.name.clone()), &v.args, &v.ret);
+                        state.out.declare_function(&state.inner, path.append(item.name.clone()), v);
                     },
                     ExternItemType::Static(v) => {
                         state.inner.statics.insert(path.append(item.name.clone()), &v.ty);
@@ -72,7 +72,7 @@ pub fn generate(output: &::std::path::Path, krate: crate::ast::Crate) -> Result<
             },
             ItemType::Function(ref f) => {
                 #[cfg(feature="cranelift")]
-                state.out.declare_function(&state.inner, path.append(item.name.as_ref().unwrap().clone()), &f.sig.args, &f.sig.ret);
+                state.out.declare_function(&state.inner, path.append(item.name.as_ref().unwrap().clone()), &f.sig);
             }
             _ => {},
             }

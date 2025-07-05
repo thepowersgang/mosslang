@@ -18,6 +18,7 @@ enum DeclaredValueItem {
     Function {
         sig: cr_ir::Signature,
         indirect_return: bool,
+        variadic_after: Option<usize>,
     },
     ExternStatic,
 }
@@ -50,25 +51,26 @@ impl Context
     }
 
     /// Forward-declare a function, allowing Cranelift generation to know its signature
-    pub fn declare_function(&mut self, state: &super::InnerState, path: AbsolutePath, args: &[(crate::ast::Pattern, crate::ast::Type)], ret: &crate::ast::Type) {
+    pub fn declare_function(&mut self, state: &super::InnerState, path: AbsolutePath, fcn_sig: &crate::ast::items::FunctionSignature) {
         let indirect_return;
         let sig = {
             let mut sig = cr_ir::Signature::new(cranelift_codegen::isa::CallConv::SystemV);
-            let ret_ti = state.type_info(ret);
+            let ret_ti = state.type_info(&fcn_sig.ret);
             indirect_return = !ret_ti.is_primitive_like() && ret_ti.size() > 0;
             if indirect_return {
                 sig.params.push(AbiParam::new(self.ptr_ty()));
             }
             else {
-                self.to_abi_params(state, &mut sig.returns, ret);
+                self.to_abi_params(state, &mut sig.returns, &fcn_sig.ret);
             }
-            for (_,aty) in args {
+            for (_,aty) in &fcn_sig.args {
                 self.to_abi_params(state, &mut sig.params, aty);
             }
             sig
             };
         let name = cr_ir::UserFuncName::user(0, self.functions.len() as u32);
-        self.functions.insert(path, (name, DeclaredValueItem::Function { sig, indirect_return }));
+        let variadic_after = fcn_sig.is_variadic.then_some(fcn_sig.args.len());
+        self.functions.insert(path, (name, DeclaredValueItem::Function { sig, indirect_return, variadic_after }));
     }
     /// Forward-declare a function, allowing Cranelift generation to know its signature
     pub fn declare_external_static(&mut self, _state: &super::InnerState, path: AbsolutePath, _ty: &crate::ast::Type) {
@@ -90,7 +92,7 @@ impl Context
             }
             rv
         };
-        let Some(&(ref name, DeclaredValueItem::Function { ref sig, indirect_return })) = self.functions.get(path) else { panic!("{} not defined as a function", path) };
+        let Some(&(ref name, DeclaredValueItem::Function { ref sig, indirect_return, variadic_after: _ })) = self.functions.get(path) else { panic!("{} not defined as a function", path) };
         let mut func = ::cranelift_codegen::ir::Function::with_name_signature(name.clone(), sig.clone());
     
         let mut builder = ::cranelift_frontend::FunctionBuilder::new(&mut func, &mut fn_builder_ctx);
@@ -413,7 +415,24 @@ fn visit_block(out_state: &mut State, return_ptr: Option<cr_ir::Value>, block_id
             };
             out_state.store_value(local_index, v);
         },
-        Operation::BitShift(local_index, value, bit_shift, value1) => todo!(),
+        Operation::BitShift(local_index, value_l, bit_shift, value_r) => {
+            let x = out_state.read_value_single(value_l);
+            let y = out_state.read_value_single(value_r);
+            let v = match ir.locals[local_index.0].kind {
+                TypeKind::Integer(crate::ast::ty::IntClass::PtrDiff|crate::ast::ty::IntClass::Signed(_)) => match bit_shift
+                    {
+                    ms_ir::BitShift::Left => todo!(),
+                    ms_ir::BitShift::Right => todo!(),
+                    },
+                TypeKind::Integer(crate::ast::ty::IntClass::PtrInt|crate::ast::ty::IntClass::Unsigned(_)) => match bit_shift
+                    {
+                    ms_ir::BitShift::Left => todo!(),
+                    ms_ir::BitShift::Right => out_state.builder.ins().ushr(x, y),
+                    },
+                _ => todo!("BitShift on {}", ir.locals[local_index.0]),
+                };
+            out_state.store_value(local_index, v);
+        },
         Operation::BorrowLocal(local_index, _, slot, wrapper_list) => {
             let VariableValue::StackSlot(ss) = out_state.variables[slot.0] else { panic!("BorrowLocal not of a slot - {:?}", out_state.variables[slot.0]); };
             let (dyn_ofs, ofs, ty) = out_state.get_offset_from_wrappers(&ir.locals[slot.0], wrapper_list);
@@ -522,17 +541,26 @@ fn visit_block(out_state: &mut State, return_ptr: Option<cr_ir::Value>, block_id
     },
     Terminator::MatchEnum { value, index, if_true, if_false  } => todo!("terminator: Match"),
     Terminator::CallPath { dst, tgt, path, args } => {
+        let (fr,is_indirect) = out_state.get_function(path, args.len(), &|i| &args[i]);
         let args = out_state.get_val_list(&args);
 
-        let fr = out_state.get_function(path);
-        let call_inst = out_state.builder.ins().call(fr, &args);
+        if is_indirect {
+            let VariableValue::StackSlot(rv_ss) = out_state.variables[dst.0] else { panic!("Return value for indirect-return function call not a stack slot"); };
+            let mut args = args;
+            let addr = out_state.builder.ins().stack_addr(out_state.ctxt.ptr_ty(), rv_ss, 0);
+            args.insert(0, addr);
+            out_state.builder.ins().call(fr, &args);
+        }
+        else {
+            let call_inst = out_state.builder.ins().call(fr, &args);
 
-        let values = out_state.builder.inst_results(call_inst);
-        // TODO: Large return values may end up being an implicit pointer
-        match values {
-        [] => {},
-        [value] => out_state.store_value(dst, *value),
-        [..] => todo!("Multiple returns?"),
+            let values = out_state.builder.inst_results(call_inst);
+            // TODO: Large return values may end up being an implicit pointer
+            match values {
+            [] => {},
+            [value] => out_state.store_value(dst, *value),
+            [..] => todo!("Multiple returns?"),
+            }
         }
 
         let (call_label, call_args) = out_state.get_jump(tgt);
@@ -829,7 +857,13 @@ impl<'ir, 'a, 'a1> State<'ir, 'a, 'a1> {
             IntClass::PtrDiff => { static T: Type = make_ty(IntClass::PtrDiff); Some(&T) },
             IntClass::Signed(0) => { static T: Type = make_ty(IntClass::Signed(0)); Some(&T) },
             IntClass::Signed(1) => { static T: Type = make_ty(IntClass::Signed(1)); Some(&T) },
+            IntClass::Signed(2) => { static T: Type = make_ty(IntClass::Signed(2)); Some(&T) },
+            IntClass::Signed(3) => { static T: Type = make_ty(IntClass::Signed(3)); Some(&T) },
             IntClass::Signed(_) => todo!(),
+            IntClass::Unsigned(0) => { static T: Type = make_ty(IntClass::Unsigned(0)); Some(&T) },
+            IntClass::Unsigned(1) => { static T: Type = make_ty(IntClass::Unsigned(1)); Some(&T) },
+            IntClass::Unsigned(2) => { static T: Type = make_ty(IntClass::Unsigned(2)); Some(&T) },
+            IntClass::Unsigned(3) => { static T: Type = make_ty(IntClass::Unsigned(3)); Some(&T) },
             IntClass::Unsigned(_) => todo!(),
             }
             },
@@ -862,25 +896,50 @@ impl<'ir, 'a, 'a1> State<'ir, 'a, 'a1> {
             .collect::<Vec<_>>()
     }
 
-    fn get_function(&mut self, path: &crate::ast::path::AbsolutePath) -> cr_ir::FuncRef {
-        let Some((name, DeclaredValueItem::Function { sig, .. })) = self.ctxt.functions.get(path) else { panic!("{} not defined as a function" ,path) };
+    fn get_function(&mut self, path: &crate::ast::path::AbsolutePath, arg_count: usize, get_arg: &dyn Fn(usize)->&'ir ms_ir::Value) -> (cr_ir::FuncRef,bool,) {
+        let Some((name, DeclaredValueItem::Function { sig, variadic_after, indirect_return })) = self.ctxt.functions.get(path) else { panic!("{} not defined as a function" ,path) };
+        let mut sig = sig;
+        let mut tmp_sig;
+        // Handle variadic functions
+        if let Some(n) = *variadic_after {
+            tmp_sig = sig.clone();
+            for i in n .. arg_count {
+                let ty = self.value_type(get_arg(i)).unwrap();
+                self.ctxt.to_abi_params(self.outer_state, &mut tmp_sig.params, ty);
+            }
+            sig = &tmp_sig;
+        }
+        // TODO: Cache
         let name = self.builder.func.declare_imported_user_function(name.get_user().unwrap().clone());
+        // TODO: Cache
         let signature = self.builder.import_signature(sig.clone());
-        self.builder.import_function(cr_ir::ExtFuncData {
+        let rv = self.builder.import_function(cr_ir::ExtFuncData {
             name: cr_ir::ExternalName::User(name),
             signature,
             colocated: false
-        })
+        });
+        (rv, *indirect_return)
     }
     fn get_global(&mut self, path: &crate::ast::path::AbsolutePath) -> (&crate::ast::Type, cr_ir::GlobalValue) {
         let Some(ty) = self.outer_state.statics.get(path) else { panic!("Undefined static {}", path) };
         let Some((name, DeclaredValueItem::ExternStatic)) = self.ctxt.functions.get(path) else { panic!("{} not defined as a static",path) };
         let name = self.builder.func.declare_imported_user_function(name.get_user().unwrap().clone());
-        let gv = self.builder.create_global_value(cr_ir::GlobalValueData::Symbol {
+        let gv_base = self.builder.create_global_value(cr_ir::GlobalValueData::Symbol {
             name: cr_ir::ExternalName::User(name),
             offset: 0.into(),
             colocated: false,
             tls: false
+        });
+        let gv = self.builder.create_global_value(cr_ir::GlobalValueData::Load {
+            base: gv_base,
+            offset: 0.into(),
+            flags: cr_ir::MemFlags::new(),
+            global_type: match get_types(ty)
+                {
+                TranslatedType::Empty => cr_ir::types::INVALID,
+                TranslatedType::Complex => todo!("Global to complex type, will need to memcpy to destination"),
+                TranslatedType::Single(cr_ty) => cr_ty,
+                },
         });
         (ty,gv)
     }
