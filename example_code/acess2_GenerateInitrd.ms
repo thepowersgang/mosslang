@@ -428,7 +428,7 @@ fn Lex_Consume(lex: *mut Lexer)
 	lex.*.string = 0p;
 	Lex_Advance(lex);
 }
-fn Lex_ConsumeYield(lex: *mut Lexer) -> *mut c_STR
+fn Lex_ConsumeYield(lex: *mut Lexer) -> *const c_STR
 {
 	let rv = lex.*.string;
 	lex.*.string = 0p;

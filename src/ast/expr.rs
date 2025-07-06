@@ -14,6 +14,7 @@ pub struct Block
     pub statements: Vec<Statement>,
     pub result: Option<Box<Expr>>,
 }
+#[derive(Debug)]
 pub enum Statement
 {
     Expr(Expr),

@@ -29,7 +29,7 @@ pub(super) fn typecheck_expr(lc: &super::LookupContext, ret_ty: &crate::ast::Typ
         for (pat, _) in args.iter_mut() {
             crate::ast::ExprVisitor::visit_mut_pattern(&mut es, pat, false);
         }
-        crate::ast::visit_mut_expr(&mut es, &mut expr.e);
+        crate::ast::ExprVisitor::visit_mut_expr(&mut es, &mut expr.e);
     }
 
     // Assign/solve
@@ -47,7 +47,8 @@ pub(super) fn typecheck_expr(lc: &super::LookupContext, ret_ty: &crate::ast::Typ
         for (pat, ty) in args.iter_mut() {
             ss.pattern_assign(pat, ty);
         }
-        crate::ast::visit_mut_expr(&mut ss, &mut expr.e);
+        crate::ast::ExprVisitor::visit_mut_expr(&mut ss, &mut expr.e);
+        ss.equate_types(&expr.e.span, ret_ty, &expr.e.data_ty);
     }
 
     let mut ir = IvarRules::default();

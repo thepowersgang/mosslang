@@ -104,7 +104,7 @@ pub struct RuleEnumerate<'a, 'b> {
     pub loop_stack: Vec<crate::ast::Type>,
 }
 impl RuleEnumerate<'_, '_> {
-    fn equate_types(&mut self, span: &crate::Span, l: &crate::ast::Type, r: &crate::ast::Type) {
+    pub fn equate_types(&mut self, span: &crate::Span, l: &crate::ast::Type, r: &crate::ast::Type) {
         equate_types(span, &mut self.ivars, l, r);
     }
 
@@ -152,19 +152,27 @@ impl RuleEnumerate<'_, '_> {
     }
     fn equate_block(&mut self, span: &crate::Span, dst_ty: &Type, block: &mut crate::ast::expr::Block) {
         if let Some(res) = &mut block.result {
+            println!("{INDENT}equate_block: RES {:?}", res);
             self.make_coerce(span, dst_ty.clone(), res);
         }
         else {
+            fn is_diverge(expr: &crate::ast::expr::Expr) -> bool {
+                use crate::ast::expr::ExprKind;
+                match expr.kind {
+                |ExprKind::Return(_)
+                |ExprKind::Break(_)
+                |ExprKind::Continue
+                    => true,
+                |ExprKind::Coerce(ref ex)
+                |ExprKind::Cast(ref ex, _)
+                    => is_diverge(ex),
+                _ => false,
+                }
+            }
             match block.statements.last() {
-            Some(crate::ast::expr::Statement::Expr(crate::ast::expr::Expr {
-                kind:
-                    |crate::ast::expr::ExprKind::Return(_)
-                    |crate::ast::expr::ExprKind::Break(_)
-                    |crate::ast::expr::ExprKind::Continue
-                    ,
-                ..
-            })) => {}
+            Some(crate::ast::expr::Statement::Expr(e)) if is_diverge(e) => {}
             _ => {
+                println!("{INDENT}equate_block: {:?}", block.statements.last());
                 self.equate_types(span, dst_ty, &Type::new_unit(span.clone()));
             }
             }
@@ -257,12 +265,7 @@ impl<'a, 'b> crate::ast::ExprVisitor for RuleEnumerate<'a, 'b> {
         match &mut expr.kind {
         ExprKind::Coerce(..) => panic!("Shouldn't be seeing coerce ops"),
         ExprKind::Block(block) => {
-            if let Some(e) = &block.result {
-                self.equate_types(&expr.span, &expr.data_ty, &e.data_ty);
-            }
-            else {
-                self.equate_types(&expr.span, &expr.data_ty, &Type::new_unit(expr.span.clone()));
-            }
+            self.equate_block(&expr.span, &expr.data_ty, block);
         },
         ExprKind::LiteralString(_) => {
             let type_cstring = Type::new_ptr(expr.span.clone(), true,
@@ -378,7 +381,7 @@ impl<'a, 'b> crate::ast::ExprVisitor for RuleEnumerate<'a, 'b> {
                     self.make_coerce(&s, req_ty.clone(), arg_expr);
                 }
             },
-            ValueBinding::ValueEnumVariant(absolute_path, _) => todo!(),
+            ValueBinding::ValueEnumVariant(_, _) => panic!("Call of a value enum variant"),
             ValueBinding::Static(absolute_path) => todo!(),
             ValueBinding::Constant(absolute_path) => todo!(),
             }
