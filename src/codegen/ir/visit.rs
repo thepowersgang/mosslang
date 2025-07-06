@@ -80,6 +80,7 @@ where
     },
 
     Operation::AssignLocal(local_index, v)
+    |Operation::Cast(local_index, v)
     |Operation::UniOp(local_index, _, v) => {
         visitor.reads_value(addr, v);
         visitor.writes_slot(addr, local_index);
@@ -239,11 +240,14 @@ pub fn visit_operation_mut<V: ?Sized + VisitorMut,>(visitor: &mut V, addr: Addr,
         visitor.writes_slot(addr, local_index_dst);
     },
 
+    // Single source
     Operation::AssignLocal(local_index, v)
+    |Operation::Cast(local_index, v)
     |Operation::UniOp(local_index, _, v) => {
         visitor.reads_value(addr, v);
         visitor.writes_slot(addr, local_index);
     },
+    // Many sources
     Operation::CreateComposite(local_index, _, values)
     |Operation::CreateDataVariant(local_index, _, _, values) => {
         for v in values {
@@ -251,6 +255,7 @@ pub fn visit_operation_mut<V: ?Sized + VisitorMut,>(visitor: &mut V, addr: Addr,
         }
         visitor.writes_slot(addr, local_index);
     },
+    // Two sources
     Operation::BinOp(local_index, vl, _, vr)
     |Operation::BitShift(local_index, vl, _, vr) => {
         visitor.reads_value(addr, vl);

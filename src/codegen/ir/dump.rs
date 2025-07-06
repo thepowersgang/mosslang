@@ -63,6 +63,8 @@ pub fn dump(out: &mut dyn ::std::io::Write, src: &super::Expr) -> ::std::io::Res
                 }
                 write!(out, ")")?;
             },
+            Operation::Cast(dst, value)
+                => write!(out, "{} = {} as _", F(dst), F(value))?,
             Operation::BinOp(dst, value, bin_op, value1)
                 => write!(out, "{} = {} {} {}", F(dst), F(value), F(bin_op), F(value1))?,
             Operation::UniOp(dst, uni_op, value)

@@ -403,6 +403,21 @@ fn visit_block(out_state: &mut State, return_ptr: Option<cr_ir::Value>, block_id
             };
             out_state.store_value(local_index, v);
         },
+        Operation::Cast(local_index, value) => {
+            let x = out_state.read_value_single(value);
+            let dst = get_types(&ir.locals[local_index.0]);
+            let src = out_state.value_type(value).map(|t| get_types(t));
+            match (dst, src)
+            {
+            (TranslatedType::Empty, None) => todo!(),
+            (TranslatedType::Empty, Some(_)) => todo!(),
+            (TranslatedType::Single(_), None) => todo!(),
+            (TranslatedType::Single(_), Some(_)) => todo!(),
+            (TranslatedType::Complex, None) => todo!(),
+            (TranslatedType::Complex, Some(_)) => todo!(),
+            }
+            todo!("cast")
+        },
         Operation::UniOp(local_index, uni_op, value) => {
             use ms_ir::UniOp;
             let x = out_state.read_value_single(value);

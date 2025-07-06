@@ -129,8 +129,15 @@ pub enum Operation {
     /// Create an instance of a tagged-union enum
     CreateDataVariant(LocalIndex, AbsolutePath, usize, Vec<Value>),
 
-    //// Cast a value to a different type (primitives only)
-    //Cast(LocalIndex, Value),
+    /// Cast a value to a different type (primitives only)
+    ///
+    /// - Type is determined by the slot type of the target.
+    /// - Casts are possibly destructive (integer downcasts truncate, signed may change sign, floats discard)
+    ///   - Signed->unsigned re-interprets (so `-1` becomes all one bits)
+    ///   - Integer->float casts may saturate
+    ///   - Float->signed casts discard the fractional component
+    ///   - Float->unsigned casts act as if there was a hidden float->signed cast first.
+    Cast(LocalIndex, Value),
 
     /// Binary operation
     BinOp(LocalIndex, Value, BinOp, Value),

@@ -382,8 +382,12 @@ impl<'a,'b> Visitor<'a,'b> {
             (ref t1, ref t2) if t1 == t2 => v,
             (TypeKind::Named(crate::ast::ty::TypePath::Resolved(b1)),TypeKind::Named(crate::ast::ty::TypePath::Resolved(b2))) if b1 == b2 => v,
             (TypeKind::Void, _) => Value::ImplicitUnit,
-            (TypeKind::Pointer { .. },TypeKind::Pointer { .. }) => v,
-            (TypeKind::Integer { .. },TypeKind::Integer { .. }) => v,   // TODO: Should this use an operation to truncate the value?
+
+            (TypeKind::Pointer { .. },TypeKind::Pointer { .. })|(TypeKind::Integer { .. },TypeKind::Integer { .. }) => {
+                let rv = self.output.allocate_slot(&expr.data_ty);
+                self.output.push_stmt(Operation::Cast(rv, v));
+                Value::Local(rv, Default::default())
+            },
             (TypeKind::Integer { .. },TypeKind::Named(crate::ast::ty::TypePath::Resolved(crate::ast::path::TypeBinding::ValueEnum(_)))) => v,
 
             // Array to pointer: Make a borrow
