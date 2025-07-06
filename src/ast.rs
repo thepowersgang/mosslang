@@ -6,10 +6,12 @@ pub mod expr;
 pub mod items;
 pub mod ty;
 pub mod path;
+pub mod pattern;
 
 pub use self::expr::ExprRoot;
 pub use self::ty::Type;
 pub use self::path::Path;
+pub use self::pattern::Pattern;
 
 pub struct Crate {
     pub attributes: Vec<Attribute>,
@@ -47,34 +49,6 @@ impl ::core::fmt::Debug for StringLiteral {
 
 pub type AbiSpec = Option<StringLiteral>;
 
-#[derive(Debug)]
-pub struct Pattern {
-    pub span: crate::Span,
-    pub bindings: Vec<PatternBinding>,
-    pub ty: PatternTy,
-    pub data_ty: Type,  // Used by type inference to store a type
-}
-pub struct PatternBinding {
-    pub name: crate::Ident,
-    pub index: Option<u32>,
-}
-impl ::std::fmt::Debug for PatternBinding {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if let Some(i) = self.index {
-            write!(f, "{}#{}", self.name, i)
-        }
-        else {
-            write!(f, "{}#?", self.name)
-        }
-    }
-}
-#[derive(Debug)]
-pub enum PatternTy {
-    Any,
-    MaybeBind(crate::Ident),
-    NamedValue(Path, Option<path::ValueBinding>),
-    Tuple(Vec<Pattern>),
-}
 
 #[derive(Debug)]
 pub struct Attribute

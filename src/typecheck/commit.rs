@@ -71,11 +71,20 @@ impl<'a> crate::ast::ExprVisitor for Visitor<'a> {
         //for binding in &pat.bindings {
         //    self.binding.index.unwrap()
         //}
+        use crate::ast::pattern::PatternTy;
         match &mut pat.ty {
-        crate::ast::PatternTy::Any => {},
-        crate::ast::PatternTy::MaybeBind(_) => {}
-        crate::ast::PatternTy::NamedValue(..) => {}
-        crate::ast::PatternTy::Tuple(patterns) => {
+        PatternTy::Any => {},
+        PatternTy::Multiple(patterns) => {
+            //self.commit_ivars_in(&pat.span, &mut pat.data_ty);
+            for pat in patterns {
+                self.visit_mut_pattern(pat, refutable);
+            }
+        }
+        PatternTy::MaybeBind(_) => {}
+        PatternTy::ValueSingle(..) => {}
+        PatternTy::ValueRangeIncl(..) => {}
+        PatternTy::ValueRangeExcl(..) => {}
+        PatternTy::Tuple(patterns) => {
             self.commit_ivars_in(&pat.span, &mut pat.data_ty);
             for pat in patterns {
                 self.visit_mut_pattern(pat, refutable);

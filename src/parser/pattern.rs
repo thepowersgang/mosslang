@@ -1,12 +1,27 @@
 use super::Result;
 use super::Lexer;
 use super::lex;
-use crate::ast::PatternBinding;
 
-use crate::ast::{Pattern, PatternTy};
+use crate::ast::Pattern;
+use crate::ast::pattern::{PatternBinding,PatternTy, Value as PatternValue, NamedValue};
 
 pub fn parse_pattern(lex: &mut Lexer) -> Result<crate::ast::Pattern> {
-    parse_pattern_inner(lex, Vec::new())
+    let ps = lex.start_span();
+    let v = parse_pattern_inner(lex, Vec::new())?;
+    if lex.opt_consume_punct(lex::Punct::Pipe)? {
+        let mut subpats = Vec::new();
+        subpats.push(v);
+        loop {
+            subpats.push( parse_pattern_inner(lex, Vec::new())? );
+            if !lex.opt_consume_punct(lex::Punct::Pipe)? {
+                break;
+            }
+        }
+        Ok(make_pat(lex.end_span(&ps), Vec::new(), PatternTy::Multiple(subpats)))
+    }
+    else {
+        Ok(v)
+    }
 }
 fn make_pat(span: crate::Span, bindings: Vec<PatternBinding>, ty: PatternTy) -> Pattern {
     Pattern {
@@ -36,11 +51,18 @@ fn parse_pattern_inner(lex: &mut Lexer, mut bindings: Vec<PatternBinding>) -> Re
             todo!("parse_pattern - named struct");
         }
         else {
-            make_pat(lex.end_span(&ps), bindings, match p.into_trivial()
-                {
-                Ok(i) => PatternTy::MaybeBind(i),
-                Err(p) => PatternTy::NamedValue(p, None),
-                })
+            match lex.peek() {
+            Some(lex::Token::Punct(lex::Punct::DoubleDot|lex::Punct::TripleDot)) => {
+                parse_pattern_after_value(lex, &ps, bindings, PatternValue::NamedValue(NamedValue::Unbound(p)))?
+            }
+            _ => {
+                make_pat(lex.end_span(&ps), bindings, match p.into_trivial()
+                    {
+                    Ok(i) => PatternTy::MaybeBind(i),
+                    Err(p) => PatternTy::ValueSingle(PatternValue::NamedValue(NamedValue::Unbound(p))),
+                    })
+            }
+            }
         }
     }
     else if lex.opt_consume_punct(lex::Punct::ParenOpen)? {
@@ -71,9 +93,35 @@ fn parse_pattern_inner(lex: &mut Lexer, mut bindings: Vec<PatternBinding>) -> Re
     }
     // TODO: Integer patterns (with ranges, and `|`)
     else {
-        //match lex.peek_no_eof()? {
-        //lex::Token::Literal(lex::Literal::Integer(, ))
-        //}
-        todo!("{}: parse_pattern - {:?}", ps, lex.peek());
+        match lex.peek() {
+        Some(lex::Token::Literal(..)) => {
+            let v1 = parse_pattern_value(lex, &ps)?;
+            parse_pattern_after_value(lex, &ps, bindings, v1)?
+            },
+        t @ _ => todo!("{}: parse_pattern - {:?}", ps, t),
+        }
     })
+}
+
+fn parse_pattern_value(lex: &mut Lexer, ps: &lex::ProtoSpan) -> Result<crate::ast::pattern::Value> {
+    Ok(match lex.consume_no_eof()? {
+    lex::Token::Literal(lex::Literal::Integer(val, _cls)) => {
+        crate::ast::pattern::Value::Integer(val/*, cls*/)
+        }
+    t @ _ => todo!("{}: parse_pattern_value - {:?}", ps, t),
+    })
+}
+fn parse_pattern_after_value(lex: &mut Lexer, ps: &lex::ProtoSpan, bindings: Vec<PatternBinding>, v1: crate::ast::pattern::Value) -> Result<crate::ast::Pattern> {
+    let p = if lex.opt_consume_punct(lex::Punct::DoubleDot)? {
+            let v2 = parse_pattern_value(lex, ps)?;
+            PatternTy::ValueRangeExcl(v1, v2)
+        }
+        else if lex.opt_consume_punct(lex::Punct::TripleDot)? /*|| lex.opt_consume_punct(lex::Punct::DoubleDotEq)?*/ {
+            let v2 = parse_pattern_value(lex, ps)?;
+            PatternTy::ValueRangeIncl(v1, v2)
+        }
+        else {
+            PatternTy::ValueSingle(v1)
+        };
+    Ok(make_pat(lex.end_span(&ps), bindings, p))
 }

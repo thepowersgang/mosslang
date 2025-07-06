@@ -305,6 +305,28 @@ impl<'a> Context<'a> {
         }
         todo!("{}Resolve value path {:?}", span, p);
     }
+    fn visit_mut_pattern_value(&mut self, span: &crate::parser::lex::Span, v: &mut crate::ast::pattern::Value) {
+        use crate::ast::pattern::{Value,NamedValue};
+        match v {
+        Value::Integer(_) => {},
+        Value::NamedValue(NamedValue::Unbound(path)) => {
+            *v = Value::NamedValue(value_binding_to_named_pattern(span, self.resolve_path_value(span, path)));
+        },
+        Value::NamedValue(_) => {},
+        }
+    }
+}
+fn value_binding_to_named_pattern(span: &crate::parser::lex::Span, vb: ValueBinding) -> crate::ast::pattern::NamedValue {
+    use crate::ast::pattern::NamedValue;
+    match vb
+    {
+    ValueBinding::Local(_) => todo!(),
+    ValueBinding::Function(_) => panic!("{span}: Using a function as a match value? {:?}", vb),
+    ValueBinding::Static(_) => todo!(),
+    ValueBinding::Constant(absolute_path) => NamedValue::Constant(absolute_path),
+    ValueBinding::DataEnumVariant(absolute_path, idx)
+    |ValueBinding::ValueEnumVariant(absolute_path, idx) => NamedValue::EnumVariant(absolute_path, idx),
+    }
 }
 impl crate::ast::ExprVisitor for Context<'_> {
     fn visit_mut_pattern(&mut self, p: &mut crate::ast::Pattern, refutable: bool) {
@@ -312,28 +334,36 @@ impl crate::ast::ExprVisitor for Context<'_> {
         for b in &mut p.bindings {
             b.index = Some(self.define_var(&b.name));
         }
-        use crate::ast::PatternTy;
+        use crate::ast::pattern::PatternTy;
         match &mut p.ty {
         PatternTy::Any => {},
         PatternTy::MaybeBind(ident) => {
             if refutable {
                 // TODO: look up globals
                 if let Some(v) = self.item_scope.values.get(ident) {
-                    p.ty = PatternTy::NamedValue(crate::ast::Path {
-                        root: crate::ast::path::Root::None,
-                        components: vec![ident.clone()],
-                    }, Some(v.clone()));
+                    p.ty = PatternTy::ValueSingle(crate::ast::pattern::Value::NamedValue(
+                        value_binding_to_named_pattern(&p.span, v.clone())
+                    ));
                     return ;
                 }
             }
-            p.bindings.push(crate::ast::PatternBinding {
+            p.bindings.push(crate::ast::pattern::PatternBinding {
                 name: ident.clone(),
                 index: Some(self.define_var(ident)),
                 });
             p.ty = PatternTy::Any;
         },
-        PatternTy::NamedValue(path, binding) => {
-            *binding = Some(self.resolve_path_value(&p.span, path));
+        PatternTy::Multiple(patterns) => {
+            for p in patterns {
+                self.visit_mut_pattern(p, refutable);
+            }
+        },
+        PatternTy::ValueSingle(v) => {
+            self.visit_mut_pattern_value(&p.span, v);
+        },
+        PatternTy::ValueRangeExcl(v1, v2)|PatternTy::ValueRangeIncl(v1, v2) => {
+            self.visit_mut_pattern_value(&p.span, v1);
+            self.visit_mut_pattern_value(&p.span, v2);
         },
         PatternTy::Tuple(patterns) => {
             for p in patterns {

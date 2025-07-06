@@ -62,11 +62,19 @@ impl<'a> crate::ast::ExprVisitor for IvarEnumerate<'a> {
     }
     
     fn visit_mut_pattern(&mut self, pat: &mut crate::ast::Pattern, refutable: bool) {
+        use crate::ast::pattern::PatternTy;
         match &mut pat.ty {
-        crate::ast::PatternTy::Any => {},
-        crate::ast::PatternTy::MaybeBind(_) => {}
-        crate::ast::PatternTy::NamedValue(..) => {}
-        crate::ast::PatternTy::Tuple(patterns) => {
+        PatternTy::Any => {},
+        PatternTy::Multiple(patterns) => {
+            for pat in patterns {
+                self.visit_mut_pattern(pat, refutable);
+            }
+            },
+        PatternTy::MaybeBind(_) => {}
+        PatternTy::ValueSingle(_) => {},
+        PatternTy::ValueRangeExcl(..) => {},
+        PatternTy::ValueRangeIncl(..) => {},
+        PatternTy::Tuple(patterns) => {
             pat.data_ty = Type::new_tuple( pat.span.clone(), patterns.iter().map(|p| Type::new_infer(p.span.clone())).collect() );
             self.fill_ivars_in(&mut pat.data_ty);
             for pat in patterns {
@@ -108,31 +116,47 @@ impl RuleEnumerate<'_, '_> {
         equate_types(span, &mut self.ivars, l, r);
     }
 
+    fn pattern_value_assign(&mut self, span: &crate::parser::lex::Span, v: &crate::ast::pattern::Value, ty: &Type) {
+        use crate::ast::pattern::Value;
+        match v {
+        Value::NamedValue(binding) => {
+            use crate::ast::pattern::NamedValue;
+            let tmp_ty;
+            let t = match binding {
+                NamedValue::Unbound(_) => panic!("Unresolved path in pattern"),
+                NamedValue::EnumVariant(absolute_path, _) => {
+                    // TODO: If this is a data variant, then it should be a function pointer
+                    let ap = AbsolutePath(absolute_path.0[..absolute_path.0.len()-1].to_owned());
+                    tmp_ty = Type::new_path_resolved(span.clone(), crate::ast::path::TypeBinding::ValueEnum(ap));
+                    &tmp_ty
+                    },
+                _ => todo!("Check equality - {:?} and {:?}", ty, binding),
+                };
+            self.equate_types(&span, t, ty);
+        },
+        Value::Integer(_) => {},
+        }
+    }
     pub fn pattern_assign(&mut self, pattern: &crate::ast::Pattern, ty: &Type) {
         println!("{INDENT}pattern_assign: {:?} = {:?}", pattern, ty);
         for b in &pattern.bindings {
             self.equate_types(&pattern.span, &self.local_tys[b.index.unwrap() as usize], ty);
         }
+        use crate::ast::pattern::PatternTy;
         match &pattern.ty {
-        crate::ast::PatternTy::Any => {},
-        crate::ast::PatternTy::MaybeBind(_) => panic!("Unexpanded MaybeBind"),
-        crate::ast::PatternTy::NamedValue(path, binding) => {
-            let Some(binding) = binding else { panic!("Unresolved path in pattern") };
-
-            use crate::ast::path::ValueBinding;
-            let tmp_ty;
-            let t = match binding {
-                ValueBinding::ValueEnumVariant(absolute_path, _) => {
-                    // TODO: If this is a data variant, then it should be a function pointer
-                    let ap = AbsolutePath(absolute_path.0[..absolute_path.0.len()-1].to_owned());
-                    tmp_ty = Type::new_path_resolved(pattern.span.clone(), crate::ast::path::TypeBinding::ValueEnum(ap));
-                    &tmp_ty
-                    },
-                _ => todo!("Check equality - {:?} and {:?}", ty, path),
-                };
-            self.equate_types(&pattern.span, t, ty);
+        PatternTy::Any => {},
+        PatternTy::MaybeBind(_) => panic!("Unexpanded MaybeBind"),
+        PatternTy::Multiple(patterns) => {
+            for pat in patterns.iter() {
+                self.pattern_assign(pat, ty);
+            }
+        }
+        PatternTy::ValueSingle(v) => self.pattern_value_assign(&pattern.span, v, ty),
+        PatternTy::ValueRangeExcl(v1, v2) | PatternTy::ValueRangeIncl(v1, v2) => {
+            self.pattern_value_assign(&pattern.span, v1, ty);
+            self.pattern_value_assign(&pattern.span, v2, ty);
         },
-        crate::ast::PatternTy::Tuple(patterns) => {
+        PatternTy::Tuple(patterns) => {
             self.equate_types(&pattern.span, &pattern.data_ty, ty);
             let TypeKind::Tuple(tys) = &pattern.data_ty.kind else { panic!() };
             for (ty, pat) in Iterator::zip(tys.iter(), patterns.iter()) {

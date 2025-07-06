@@ -6,18 +6,19 @@ type c_STR = [c_char; ...];
 struct FILE { ... }
 const SEEK_END: i32 = -1;
 extern "C" {
-    fn perror(msg: *const c_STR);
-    fn fprintf(_: *mut FILE, fmt: *const c_STR, ...);
-    static stderr: *mut FILE;
-    fn fopen(path: *const c_STR, mode: *const c_STR) -> *mut FILE;
-    fn fseek(fp: *mut FILE, ofs: i64, dir: i32);
-    fn ftell(fp: *mut FILE) -> u64;
-    fn fgetc(fp: *mut FILE) -> i32;
-    fn fclose(fp: *mut FILE);
-    
-    // string.h
-    fn strerror(errnum: i32) -> *mut c_STR;
-    fn strlen(s: *const c_STR) -> usize;
+	fn perror(msg: *const c_STR);
+	fn fprintf(_: *mut FILE, fmt: *const c_STR, ...);
+	static stderr: *mut FILE;
+	fn fopen(path: *const c_STR, mode: *const c_STR) -> *mut FILE;
+	fn fseek(fp: *mut FILE, ofs: i64, dir: i32);
+	fn ftell(fp: *mut FILE) -> u64;
+	fn fgetc(fp: *mut FILE) -> i32;
+	fn ungetc(ch: i32, fp: *mut FILE);
+	fn fclose(fp: *mut FILE);
+	
+	// string.h
+	fn strerror(errnum: i32) -> *mut c_STR;
+	fn strlen(s: *const c_STR) -> usize;
 	fn strcmp(s1: *const c_STR, s2: *const c_STR) -> i32;
 	fn strncmp(s1: *const c_STR, s2: *const c_STR, max_len: usize) -> i32;
 	fn strcpy(d: *mut c_STR, s: *const c_STR) -> *mut c_STR;
@@ -27,125 +28,125 @@ extern "C" {
 	fn strrchr(s1: *const c_STR, c: c_char) -> *const c_STR;
 	fn memcmp(s1: *const void, s2: *const void, count: usize) -> i32;
 	fn memcpy(dst: *mut void, src: *const void, count: usize) -> *mut void;
-    
-    // stdlib.h
-    fn getenv(name: *const c_STR) -> *mut c_STR;
-    fn exit(status: i32);// -> !;
-	fn malloc(size: usize) -> *mut void;    // TODO: Make a type that can be coerced to anything (`void` can coerce _from_ anything)
+	
+	// stdlib.h
+	fn getenv(name: *const c_STR) -> *mut c_STR;
+	fn exit(status: i32);// -> !;
+	fn malloc(size: usize) -> *mut void;	// TODO: Make a type that can be coerced to anything (`void` can coerce _from_ anything)
 	fn realloc(old: *mut void, size: usize) -> *mut void;
 	fn free(ptr: *const void);
-    static errno: i32;
+	static errno: i32;
 
-    // ctype.h
-    fn isalnum(ch: i32) -> bool;
-    fn isblank(ch: i32) -> bool;
+	// ctype.h
+	fn isalnum(ch: i32) -> bool;
+	fn isblank(ch: i32) -> bool;
 }
 
 enum Token {
-    Eof,
-    Comment,
-    Newline,
-    BraceOpen,
-    BraceClose,
-    Ident,
-    String,
+	Eof,
+	Comment,
+	Newline,
+	BraceOpen,
+	BraceClose,
+	Ident,
+	String,
 }
 
 struct Lexer {
-    filename: *const c_STR,
-    file: *mut FILE,
-    cur_line: u32,
-    last_token: Token,
-    string: *const c_STR,
+	filename: *const c_STR,
+	file: *mut FILE,
+	cur_line: u32,
+	last_token: Token,
+	string: *const c_STR,
 }
 struct OutState {
-    next_inode_idx: u32,
-    
-    out_c: *mut FILE,
-    out_ldopts: *mut FILE,
-    //out_dep: *mut FILE,
+	next_inode_idx: u32,
+	
+	out_c: *mut FILE,
+	out_ldopts: *mut FILE,
+	//out_dep: *mut FILE,
 
-    dependencies: *mut [*const c_STR; ...],
-    num_dependencies: usize,
+	dependencies: *mut [*const c_STR; ...],
+	num_dependencies: usize,
 }
 struct DirEnt {
-    inode: u32,
-    name: [c_char; ...],    // This is different to rust's `[c_char]` syntax, in that it generates a thin pointer
+	inode: u32,
+	name: [c_char; ...],	// This is different to rust's `[c_char]` syntax, in that it generates a thin pointer
 }
 struct DirEnts {
-    num_ents: usize,
-    ents: *mut [*mut DirEnt; ...],
+	num_ents: usize,
+	ents: *mut [*mut DirEnt; ...],
 }
 
 extern "C" fn main(argc: usize, argv: *const [*const c_STR; ...]) -> i32 {
-    let infile = 0p;
-    let outfile_c = 0p;
-    let outfile_dep = 0p;
-    let outfile_ldopts = 0p;
-    
-    for arg_i in 1 .. argc
-    {
-        let arg = argv[arg_i];
-        if arg[0] != '-' {
-            if infile == 0p {
-                infile = arg;
-            }
-            else if outfile_c == 0p {
-                outfile_c = arg;
-            }
-            else if outfile_ldopts == 0p {
-                outfile_ldopts = arg;
-            }
-            else if outfile_dep == 0p {
-                outfile_dep = arg;
-            }
-            else {
-                fprintf(stderr, "Unexpected free argument\n");
-                return 1;
-            }
-        }
-        else {
-            fprintf(stderr, "Unexpected argument\n");
-            return 1;
-        }
-    }
+	let infile = 0p;
+	let outfile_c = 0p;
+	let outfile_dep = 0p;
+	let outfile_ldopts = 0p;
+	
+	for arg_i in 1 .. argc
+	{
+		let arg = argv[arg_i];
+		if arg[0] != '-' {
+			if infile == 0p {
+				infile = arg;
+			}
+			else if outfile_c == 0p {
+				outfile_c = arg;
+			}
+			else if outfile_ldopts == 0p {
+				outfile_ldopts = arg;
+			}
+			else if outfile_dep == 0p {
+				outfile_dep = arg;
+			}
+			else {
+				fprintf(stderr, "Unexpected free argument\n");
+				return 1;
+			}
+		}
+		else {
+			fprintf(stderr, "Unexpected argument\n");
+			return 1;
+		}
+	}
 
-    let fp = fopen(infile, "r");
-    if fp == 0p {
-        perror("Unable to open input file");
-        return 1;
-    }
+	let fp = fopen(infile, "r");
+	if fp == 0p {
+		perror("Unable to open input file");
+		return 1;
+	}
 
-    let lexer = Lex_Init(infile, fp);
-    let os = OutState {
-        next_inode_idx: 1,
+	let lexer = Lex_Init(infile, fp);
+	let os = OutState {
+		next_inode_idx: 1,
 		out_c: fopen(outfile_c, "w"),
 		out_ldopts: fopen(outfile_ldopts, "w"),
 		//out_dep: fopen(outfile_dep, "w"),
 
-        dependencies: 0p,
-        num_dependencies: 0,
-    };
+		dependencies: 0p,
+		num_dependencies: 0,
+	};
 
-    fprintf(os.out_c, "\
-        /*
-        * Acess2 InitRD
-        * InitRD Data
-        * Generated ???
-        */
-        #include \"initrd.h\"
-        ");
-    fprintf(os.out_ldopts, "--format binary\n");
-
-
-    ProcessDir(&mut lexer, &mut os, 0, Token::Eof);
+	fprintf(os.out_c, "\
+		/*
+		* Acess2 InitRD
+		* InitRD Data
+		* Generated ???
+		*/
+		#include \"initrd.h\"
+		");
+	fprintf(os.out_ldopts, "--format binary\n");
 
 
-    // --- Finalize the C file (node list)
+	ProcessDir(&mut lexer, &mut os, 0, Token::Eof);
+
+
+	// --- Finalize the C file (node list)
 	fprintf(os.out_c, "tVFS_Node * const gInitRD_FileList[] = {");
 	for i in 0 .. os.next_inode_idx {
 		fprintf(os.out_c, "&INITRD_%u, ", i);
-    }
+	}
 	fprintf(os.out_c, "};\n");
 	
 	// --- Close running output files
@@ -153,21 +154,21 @@ extern "C" fn main(argc: usize, argv: *const [*const c_STR; ...]) -> i32 {
 	fclose(os.out_ldopts);
 	
 	// --- Write the dependency file
-    {
-        let depfile = fopen(outfile_dep, "w");
-        //assert(depfile);
-        fprintf(depfile, "%s:", outfile_c);
-        for i in 0 .. os.num_dependencies {
-            fprintf(depfile, " %s", os.dependencies[i]);
-        }
-        fprintf(depfile, "\n");
-        for i in 0 .. os.num_dependencies {
-            fprintf(depfile, "%s:\n", os.dependencies[i]);
-            free(os.dependencies[i]);
-        }
-        free(os.dependencies);
-        fclose(depfile);
-    }
+	{
+		let depfile = fopen(outfile_dep, "w");
+		//assert(depfile);
+		fprintf(depfile, "%s:", outfile_c);
+		for i in 0 .. os.num_dependencies {
+			fprintf(depfile, " %s", os.dependencies[i]);
+		}
+		fprintf(depfile, "\n");
+		for i in 0 .. os.num_dependencies {
+			fprintf(depfile, "%s:\n", os.dependencies[i]);
+			free(os.dependencies[i]);
+		}
+		free(os.dependencies);
+		fclose(depfile);
+	}
 	
 	0
 }
@@ -180,10 +181,10 @@ fn ProcessDir(lex: *mut Lexer, os: *mut OutState, inode: u32, end: Token)
 	{
 		while (lex.*.last_token == Token::Newline) {
 			Lex_Consume(lex);
-        }
+		}
 		if (lex.*.last_token == end) {
 			break ;
-        }
+		}
 		Lex_Expect(lex, Token::Ident);
 		
 		if strcmp(lex.*.string, "Dir") == 0 {
@@ -194,7 +195,7 @@ fn ProcessDir(lex: *mut Lexer, os: *mut OutState, inode: u32, end: Token)
 			Lex_Consume(lex);
 
 			let child_inode = os.*.next_inode_idx;
-            os.*.next_inode_idx += 1;
+			os.*.next_inode_idx += 1;
 			
 			ProcessDir(lex, os, child_inode, Token::BraceClose);
 			
@@ -236,15 +237,15 @@ fn ProcessDir(lex: *mut Lexer, os: *mut OutState, inode: u32, end: Token)
 	free(dents.ents);
 	fprintf(os.*.out_c, "};\n");
 	fprintf(os.*.out_c, "\
-        tVFS_Node INITRD_%u = { \
-            .NumACLs = 1, \
-            .ACLs = &gVFS_ACL_EveryoneRX, \
-            .Flags = VFS_FFLAG_DIRECTORY, \
-            .Size = %u, \
-            .Inode = %u, \
-            .ImplPtr = INITRD_%u_entries, \
-            .Type = &gInitRD_DirType \
-        };\n\n"
+		tVFS_Node INITRD_%u = { \
+			.NumACLs = 1, \
+			.ACLs = &gVFS_ACL_EveryoneRX, \
+			.Flags = VFS_FFLAG_DIRECTORY, \
+			.Size = %u, \
+			.Inode = %u, \
+			.ImplPtr = INITRD_%u_entries, \
+			.Type = &gInitRD_DirType \
+		};\n\n"
 		, inode, dents.num_ents, inode, inode
 		);
 	Lex_Consume(lex);
@@ -266,7 +267,7 @@ fn AddFile(os: *mut OutState, dents: *mut DirEnts, is_opt: bool, name: *const c_
 		let len = expand_path(0p, path);
 		let realpath = malloc(len+1) as *mut c_STR;
 		expand_path(realpath, path);
-        realpath
+		realpath
 	};
 	
 	let file_size = {
@@ -284,11 +285,11 @@ fn AddFile(os: *mut OutState, dents: *mut DirEnts, is_opt: bool, name: *const c_
 		fseek(fp, 0, SEEK_END);
 		let file_size = ftell(fp);
 		fclose(fp);
-        file_size
+		file_size
 	};
 	
 	let node_idx = os.*.next_inode_idx;
-    os.*.next_inode_idx += 1;
+	os.*.next_inode_idx += 1;
 
 	fprintf(os.*.out_ldopts, "%s\n", realpath);
 	
@@ -362,8 +363,8 @@ fn expand_path(out: *mut c_STR, src: *const c_STR) -> usize {
 			}
 		}
 		else {
-            if out != 0p { out[rv] = src[0]; }
-            rv += 1;
+			if out != 0p { out[rv] = src[0]; }
+			rv += 1;
 			src += 1;
 		}
 	}
@@ -378,16 +379,16 @@ fn ld_mangle(out: *mut c_STR, src: *const c_STR) -> usize {
 	while *src != 0 {
 		/*match *src {
 		'_' | '$'
-        |'0' ... '9'
+		|'0' ... '9'
 		|'a' ... 'z'
 		|'A' ... 'Z'*/
-        if isalnum(*src) || *src == '_' || *src == '$' {
+		if isalnum(*src) || *src == '_' || *src == '$' {
 			if out != 0p { out[rv] = *src; }
-        }
-        else {
+		}
+		else {
 			if out != 0p { out[rv] = '_'; }
-        }
-        rv += 1;
+		}
+		rv += 1;
 		src += 1;
 	}
 	if out != 0p { out[rv] = '\0'; }
@@ -399,27 +400,27 @@ fn ld_mangle(out: *mut c_STR, src: *const c_STR) -> usize {
 // --------------------------------------------------------------------
 fn Lex_Init(filename: *const c_STR, fp: *mut FILE) -> Lexer
 {
-    let rv = Lexer {
-        filename: filename,
-        file: fp,
-        string: 0p,
-        cur_line: 0,
-        last_token: Token::Newline,
-    };
+	let rv = Lexer {
+		filename: filename,
+		file: fp,
+		string: 0p,
+		cur_line: 0,
+		last_token: Token::Newline,
+	};
 	Lex_Advance(&mut rv);
 	rv
 }
 fn Lex_Advance(lex: *mut Lexer)
 {
-    loop {
+	loop {
 		//assert(lex.*.string == NULL);
 		if( lex.*.last_token == Token::Newline ) {
 			lex.*.cur_line += 1;
 		}
 		lex.*.last_token = get_token_int(lex.*.file, &mut lex.*.string);
-        if( lex.*.last_token != Token::Comment ) {
-            break
-        }
+		if( lex.*.last_token != Token::Comment ) {
+			break
+		}
 	}
 }
 fn Lex_Consume(lex: *mut Lexer)
@@ -454,7 +455,7 @@ fn get_token_int(ifp: *mut FILE, string: *mut *const c_STR) -> Token {
 	while isblank(ch) {
 		if ch == '\n' {
 			return Token::Newline;
-        }
+		}
 		ch = fgetc(ifp);
 	}
 	
@@ -462,22 +463,29 @@ fn get_token_int(ifp: *mut FILE, string: *mut *const c_STR) -> Token {
 		return Token::Eof;
 	}
 	
-    /*
 	match ch {
 	'\n' => Token::Newline,
 	'#' => {
-		while (ch = fgetc(ifp)) != '\n' {
-        }
-		ungetc(ch, ifp);
+		loop {
+			ch = fgetc(ifp);
+			if ch < 0 {
+				// Not an error: just indicates no newline at EOF
+				break;
+			}
+			if ch == '\n' {
+				ungetc(ch, ifp);
+				break
+			}
+		}
 		Token::Comment
-        },
+		},
 	'a' ... 'z'|'A' ... 'Z' => {
 		let len = 0;
-		let s = 0p;
+		let s: *mut c_STR = 0p;
 		while isalnum(ch) {
 			len += 1;
 			s = realloc(s, len+1);
-			assert(s);
+			//assert(s);
 			s[len-1] = ch;
 			
 			ch = fgetc(ifp);
@@ -485,14 +493,22 @@ fn get_token_int(ifp: *mut FILE, string: *mut *const c_STR) -> Token {
 		s[len] = '\0';
 		*string = s;
 		Token::Ident
-        }
+		}
 	'"' => {
 		let len = 0;
-		let s = malloc(1);
-		while (ch = fgetc(ifp)) != '"' {
+		let s: *mut c_STR = 0p;
+		loop {
+			ch = fgetc(ifp);
+			if ch < 0 {
+				fprintf(stderr, "ERROR: Unexpected EOF\n", ch);
+				break	// TODO: Error?
+			}
+			if ch == '"' {
+				break;
+			}
 			len += 1;
 			s = realloc(s, len+1);
-			assert(s);
+			//assert(s);
 			s[len-1] = ch;
 		}
 		s[len] = '\0';
@@ -501,12 +517,12 @@ fn get_token_int(ifp: *mut FILE, string: *mut *const c_STR) -> Token {
 		}
 	'{' => Token::BraceOpen,
 	'}' => Token::BraceClose,
-    _ => {
+	_ => {
 		fprintf(stderr, "ERROR: Unexpected character '%c'\n", ch);
 		exit(1);
-        }
+		loop {}
+		}
 	}
-    */
 }
 
 
@@ -518,7 +534,7 @@ fn strdup(s: *const c_STR) -> *mut c_STR
 {
 	let rv = malloc(strlen(s) + 1);
 	if rv != 0p {
-	    strcpy(rv, s);
-    }
+		strcpy(rv, s);
+	}
 	rv
 }

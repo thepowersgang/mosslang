@@ -1,4 +1,15 @@
-/target
+# VSCode Backup files
 **/*.rs.bk
-example_code/*.o
+# Cargo target directory
+/target
+
+# Debug output
 1.txt
+
+# Output artifacts
+# - Compiled object files
+example_code/*.o
+# - Raw IR
+example_code/*.moss_ir
+# - SSA IR
+example_code/*.moss_ssa

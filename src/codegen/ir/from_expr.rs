@@ -682,39 +682,43 @@ impl<'a,'b> Visitor<'a,'b> {
         }
     }
 
+    fn get_pattern_value(&mut self, span: &crate::parser::lex::Span, val: &crate::ast::pattern::Value) -> super::Value {
+        use crate::ast::pattern::Value as PatternValue;
+        use crate::ast::pattern::NamedValue;
+        match val {
+        PatternValue::Integer(_) => todo!(),
+        PatternValue::NamedValue(NamedValue::Unbound(_)) => unreachable!("{}: Unresolved pattern value encountered", span),
+        PatternValue::NamedValue(NamedValue::EnumVariant(..)) => panic!("{}: Unexpected enum variant?", span),
+        PatternValue::NamedValue(NamedValue::Constant(absolute_path)) => self.visit_expr( &self.parent.inner.constants.get(absolute_path).expect("Missing constant?").e ),
+        }
+    }
     fn match_pattern(&mut self, pattern: &crate::ast::Pattern, value: super::Value, bb_true: super::BlockIndex, bb_false: super::BlockIndex) {
-        use crate::ast::PatternTy;
+        use crate::ast::pattern::PatternTy;
+        use crate::ast::pattern::Value as PatternValue;
+        use crate::ast::pattern::NamedValue;
         match &pattern.ty {
         PatternTy::MaybeBind(_) => unreachable!("Should have been resolved"),
         PatternTy::Any => {},
-        PatternTy::NamedValue(_, binding) => {
-            let Some(binding) = binding else { unreachable!("Should have been resolved") };
-            use crate::ast::path::ValueBinding;
-            match binding {
-            ValueBinding::Local(_) => todo!("Can't match to a local?"),
-            ValueBinding::Function(_) => todo!("Can't match to a function."),
-            ValueBinding::Static(_) => panic!("{span}: Attempting to match against a static", span=pattern.span),
-            //ValueBinding::StructValue(_) => {},
-            ValueBinding::Constant(absolute_path) => {
-                let cv = self.visit_expr( &self.parent.inner.constants.get(absolute_path).expect("Missing constant?").e );
-                self.output.end_block(super::Terminator::Compare {
-                    lhs: value, op: super::CmpOp::Eq, rhs: cv,
-                    if_true: bb_true.into(),
-                    if_false: bb_false.into(),
-                });
-                return ;
-            },
-            ValueBinding::ValueEnumVariant(_, var_idx)|ValueBinding::DataEnumVariant(_, var_idx) => {
-                // Get the enum variant index
-                self.output.end_block(super::Terminator::MatchEnum {
-                    value, index: *var_idx,
-                    if_true: bb_true.into(),
-                    if_false: bb_false.into()
-                });
-                return ;
-            },
-            }
+        PatternTy::Multiple(_) => todo!(),
+        PatternTy::ValueSingle(PatternValue::NamedValue(NamedValue::EnumVariant(_, var_idx))) => {
+            // Get the enum variant index
+            self.output.end_block(super::Terminator::MatchEnum {
+                value, index: *var_idx,
+                if_true: bb_true.into(),
+                if_false: bb_false.into()
+            });
+            return ;
         },
+        PatternTy::ValueSingle(v) => {
+            let cv = self.get_pattern_value(&pattern.span, v);
+            self.output.end_block(super::Terminator::Compare {
+                lhs: value, op: super::CmpOp::Eq, rhs: cv,
+                if_true: bb_true.into(),
+                if_false: bb_false.into(),
+            });
+            return ;
+        },
+        PatternTy::ValueRangeExcl(..)|PatternTy::ValueRangeIncl(..) => todo!("{}: Range patterns", pattern.span),
         PatternTy::Tuple(patterns) => {
             for (i,sp) in patterns.iter().enumerate() {
                 let bb_next = self.output.new_block();
@@ -727,11 +731,14 @@ impl<'a,'b> Visitor<'a,'b> {
 
     }
     pub fn destructure_pattern(&mut self, pattern: &crate::ast::Pattern, value: super::Value) {
-        use crate::ast::PatternTy;
+        use crate::ast::pattern::PatternTy;
         match &pattern.ty {
         PatternTy::Any => {},
+        PatternTy::Multiple(_) => todo!(),
         PatternTy::MaybeBind(_) => unreachable!("Should have been resolved"),
-        PatternTy::NamedValue(_, _) => {},
+        PatternTy::ValueSingle(_) => {},
+        PatternTy::ValueRangeIncl(_, _) => {},
+        PatternTy::ValueRangeExcl(_, _) => {},
         PatternTy::Tuple(patterns) => {
             for (i,sp) in patterns.iter().enumerate() {
                 self.destructure_pattern(sp, value.field(i));
