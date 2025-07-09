@@ -763,7 +763,10 @@ impl<'a,'b> Visitor<'a,'b> {
         use crate::ast::pattern::PatternTy;
         match &pattern.ty {
         PatternTy::Any => {},
-        PatternTy::Multiple(_) => todo!("Destructure multiple"),
+        PatternTy::Multiple(_) => {
+            //todo!("Destructure multiple")
+            // TODO: Validate that there are no bindings, OR check each pattern again with `match_pattern` before recursing with `destructure_pattern`
+        },
         PatternTy::MaybeBind(_) => unreachable!("Should have been resolved"),
         PatternTy::ValueSingle(_) => {},
         PatternTy::ValueRangeIncl(_, _) => {},
