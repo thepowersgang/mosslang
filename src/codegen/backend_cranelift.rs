@@ -275,6 +275,8 @@ where
         v
     };
 
+    println!("{INDENT}block_visit_order = {:?}", block_visit_order);
+
     // Pre-seal the first block
     out_state.builder.seal_block(out_state.blocks[0]);
     // Start lowering blocks
@@ -405,18 +407,78 @@ fn visit_block(out_state: &mut State, return_ptr: Option<cr_ir::Value>, block_id
         },
         Operation::Cast(local_index, value) => {
             let x = out_state.read_value_single(value);
-            let dst = get_types(&ir.locals[local_index.0]);
-            let src = out_state.value_type(value).map(|t| get_types(t));
-            match (dst, src)
-            {
-            (TranslatedType::Empty, None) => todo!(),
-            (TranslatedType::Empty, Some(_)) => todo!(),
-            (TranslatedType::Single(_), None) => todo!(),
-            (TranslatedType::Single(_), Some(_)) => todo!(),
-            (TranslatedType::Complex, None) => todo!(),
-            (TranslatedType::Complex, Some(_)) => todo!(),
+            enum Ty {
+                Discard,
+                Signed(u8),
+                Unsigned(u8),
+                //Float(u8),
             }
-            todo!("cast")
+            fn get_ty(ty: &crate::ast::Type) -> Ty {
+                match ty.kind
+                {
+                TypeKind::Void => Ty::Discard,
+                TypeKind::Bool => Ty::Unsigned(0),
+                TypeKind::Pointer { .. } | TypeKind::Integer(crate::ast::ty::IntClass::PtrInt) => Ty::Unsigned(3),
+                TypeKind::Integer(crate::ast::ty::IntClass::PtrDiff) => Ty::Signed(3),
+                TypeKind::Integer(crate::ast::ty::IntClass::Unsigned(sz)) => Ty::Unsigned(sz),
+                TypeKind::Integer(crate::ast::ty::IntClass::Signed(sz)) => Ty::Signed(sz),
+
+                TypeKind::Tuple(..) => todo!(),
+                TypeKind::Named(..) => todo!(),
+                TypeKind::Array { .. } => todo!(),
+                TypeKind::UnsizedArray(..) => todo!(),
+
+                TypeKind::Infer { .. } => todo!(),
+                TypeKind::TypeOf(..) => todo!(),
+                }
+            }
+            let dst = get_ty(&ir.locals[local_index.0]);
+            let dst_cr = match get_types(&ir.locals[local_index.0])
+                {
+                TranslatedType::Empty => todo!(),
+                TranslatedType::Single(t) => t,
+                TranslatedType::Complex => todo!(),
+                };
+            let src = out_state.value_type(value).map(|t| get_ty(t)).expect("Cannot get source type for cast");
+            let res = match dst {
+                Ty::Discard => todo!(),
+                //Ty::Float(_) => todo!(),
+                Ty::Unsigned(ds) => match src
+                    {
+                    Ty::Discard => todo!(),
+                    Ty::Signed(_) => todo!(),
+                    Ty::Unsigned(ss) => {
+                        if ds == ss {
+                            x
+                        }
+                        else if ds < ss {
+                            out_state.builder.ins().ireduce(dst_cr, x)
+                        }
+                        else {
+                            out_state.builder.ins().uextend(dst_cr, x)
+                        }
+                    },
+                    //Ty::Float(_) => todo!(),
+                    },
+                Ty::Signed(ds) => match src
+                    {
+                    Ty::Discard => todo!(),
+                    Ty::Signed(ss) => {
+                        if ds == ss {
+                            x
+                        }
+                        else if ds < ss {
+                            out_state.builder.ins().ireduce(dst_cr, x)
+                        }
+                        else {
+                            out_state.builder.ins().sextend(dst_cr, x)
+                        }
+                    },
+                    Ty::Unsigned(_) => todo!(),
+                    //Ty::Float(_) => todo!(),
+                    },
+                };
+            out_state.store_value(local_index, res);
         },
         Operation::UniOp(local_index, uni_op, value) => {
             use ms_ir::UniOp;
@@ -509,6 +571,7 @@ fn visit_block(out_state: &mut State, return_ptr: Option<cr_ir::Value>, block_id
                     }
                 },
             }
+            out_state.builder.ins().return_(&[]);
         }
         else {
             let vals = value.into_iter(out_state).collect::<Vec<_>>();
