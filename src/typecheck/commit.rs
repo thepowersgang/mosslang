@@ -72,10 +72,10 @@ impl<'a> crate::ast::ExprVisitor for Visitor<'a> {
         //    self.binding.index.unwrap()
         //}
         use crate::ast::pattern::PatternTy;
+        self.commit_ivars_in(&pat.span, &mut pat.data_ty);
         match &mut pat.ty {
         PatternTy::Any => {},
         PatternTy::Multiple(patterns) => {
-            //self.commit_ivars_in(&pat.span, &mut pat.data_ty);
             for pat in patterns {
                 self.visit_mut_pattern(pat, refutable);
             }
@@ -85,7 +85,6 @@ impl<'a> crate::ast::ExprVisitor for Visitor<'a> {
         PatternTy::ValueRangeIncl(..) => {}
         PatternTy::ValueRangeExcl(..) => {}
         PatternTy::Tuple(patterns) => {
-            self.commit_ivars_in(&pat.span, &mut pat.data_ty);
             for pat in patterns {
                 self.visit_mut_pattern(pat, refutable);
             }

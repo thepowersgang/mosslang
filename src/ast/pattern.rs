@@ -3,7 +3,8 @@ pub struct Pattern {
     pub span: crate::Span,
     pub bindings: Vec<PatternBinding>,
     pub ty: PatternTy,
-    pub data_ty: super::Type,  // Used by type inference to store a type
+    /// Used by type inference to store a type
+    pub data_ty: super::Type,
 }
 pub struct PatternBinding {
     pub name: crate::Ident,

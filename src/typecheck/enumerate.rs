@@ -76,12 +76,12 @@ impl<'a> crate::ast::ExprVisitor for IvarEnumerate<'a> {
         PatternTy::ValueRangeIncl(..) => {},
         PatternTy::Tuple(patterns) => {
             pat.data_ty = Type::new_tuple( pat.span.clone(), patterns.iter().map(|p| Type::new_infer(p.span.clone())).collect() );
-            self.fill_ivars_in(&mut pat.data_ty);
             for pat in patterns {
                 self.visit_mut_pattern(pat, refutable);
             }
         }
         }
+        self.fill_ivars_in(&mut pat.data_ty);
     }
 
     fn visit_mut_block(&mut self, block: &mut crate::ast::expr::Block) {
@@ -143,6 +143,7 @@ impl RuleEnumerate<'_, '_> {
             self.equate_types(&pattern.span, &self.local_tys[b.index.unwrap() as usize], ty);
         }
         use crate::ast::pattern::PatternTy;
+        self.equate_types(&pattern.span, &pattern.data_ty, ty);
         match &pattern.ty {
         PatternTy::Any => {},
         PatternTy::MaybeBind(_) => panic!("Unexpanded MaybeBind"),
@@ -157,7 +158,6 @@ impl RuleEnumerate<'_, '_> {
             self.pattern_value_assign(&pattern.span, v2, ty);
         },
         PatternTy::Tuple(patterns) => {
-            self.equate_types(&pattern.span, &pattern.data_ty, ty);
             let TypeKind::Tuple(tys) = &pattern.data_ty.kind else { panic!() };
             for (ty, pat) in Iterator::zip(tys.iter(), patterns.iter()) {
                 self.pattern_assign(pat, ty);

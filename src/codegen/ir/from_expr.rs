@@ -686,15 +686,24 @@ impl<'a,'b> Visitor<'a,'b> {
         }
     }
 
-    fn get_pattern_value(&mut self, span: &crate::parser::lex::Span, val: &crate::ast::pattern::Value) -> super::Value {
+    fn get_pattern_value(&mut self, span: &crate::parser::lex::Span, val: &crate::ast::pattern::Value, ty: &crate::ast::Type) -> super::Value {
         use crate::ast::pattern::Value as PatternValue;
         use crate::ast::pattern::NamedValue;
         match val {
-        PatternValue::Integer(_) => todo!(),
+        PatternValue::Integer(v) => {
+            let crate::ast::ty::TypeKind::Integer(cls) = ty.kind else { panic!("{}: Type of integer value not an integer - {}", span, ty); };
+            super::Value::IntegerLiteral(*v, cls)
+        },
         PatternValue::NamedValue(NamedValue::Unbound(_)) => unreachable!("{}: Unresolved pattern value encountered", span),
         PatternValue::NamedValue(NamedValue::EnumVariant(..)) => panic!("{}: Unexpected enum variant?", span),
         PatternValue::NamedValue(NamedValue::Constant(absolute_path)) => self.visit_expr( &self.parent.inner.constants.get(absolute_path).expect("Missing constant?").e ),
         }
+    }
+    fn match_pattern_range(&mut self, _: &crate::parser::lex::Span, value: super::Value, left: super::Value, right: super::Value, incl: bool, bb_true: super::BlockIndex, bb_false: super::BlockIndex) {
+        let bb_next = self.output.new_block();
+        self.output.end_block(super::Terminator::Compare { lhs: value.clone(), op: super::CmpOp::Ge, rhs: left, if_true: bb_next.into(), if_false: bb_false.into() });
+        self.output.start_block(bb_next);
+        self.output.end_block(super::Terminator::Compare { lhs: value, op: if incl { super::CmpOp::Le } else { super::CmpOp::Lt }, rhs: right, if_true: bb_true.into(), if_false: bb_false.into() });
     }
     fn match_pattern(&mut self, pattern: &crate::ast::Pattern, value: super::Value, bb_true: super::BlockIndex, bb_false: super::BlockIndex) {
         use crate::ast::pattern::PatternTy;
@@ -702,8 +711,17 @@ impl<'a,'b> Visitor<'a,'b> {
         use crate::ast::pattern::NamedValue;
         match &pattern.ty {
         PatternTy::MaybeBind(_) => unreachable!("Should have been resolved"),
-        PatternTy::Any => {},
-        PatternTy::Multiple(_) => todo!(),
+        PatternTy::Any => {
+            self.output.end_block(super::Terminator::Goto(bb_true.into()))
+        },
+        PatternTy::Multiple(pats) => {
+            for pattern in pats {
+                let bb_next = self.output.new_block();
+                self.match_pattern(pattern, value.clone(), bb_true, bb_next);
+                self.output.start_block(bb_next);
+            }
+            self.output.end_block(super::Terminator::Goto(bb_false.into()));
+        },
         PatternTy::ValueSingle(PatternValue::NamedValue(NamedValue::EnumVariant(_, var_idx))) => {
             // Get the enum variant index
             self.output.end_block(super::Terminator::MatchEnum {
@@ -711,34 +729,41 @@ impl<'a,'b> Visitor<'a,'b> {
                 if_true: bb_true.into(),
                 if_false: bb_false.into()
             });
-            return ;
         },
         PatternTy::ValueSingle(v) => {
-            let cv = self.get_pattern_value(&pattern.span, v);
+            let cv = self.get_pattern_value(&pattern.span, v, &pattern.data_ty);
             self.output.end_block(super::Terminator::Compare {
                 lhs: value, op: super::CmpOp::Eq, rhs: cv,
                 if_true: bb_true.into(),
                 if_false: bb_false.into(),
             });
-            return ;
         },
-        PatternTy::ValueRangeExcl(..)|PatternTy::ValueRangeIncl(..) => todo!("{}: Range patterns", pattern.span),
+        PatternTy::ValueRangeExcl(left, right) => {
+            let left = self.get_pattern_value(&pattern.span, left, &pattern.data_ty);
+            let right = self.get_pattern_value(&pattern.span, right, &pattern.data_ty);
+            self.match_pattern_range(&pattern.span, value, left, right, false, bb_true, bb_false);
+        },
+        PatternTy::ValueRangeIncl(left, right) => {
+            let left = self.get_pattern_value(&pattern.span, left, &pattern.data_ty);
+            let right = self.get_pattern_value(&pattern.span, right, &pattern.data_ty);
+            self.match_pattern_range(&pattern.span, value, left, right, true, bb_true, bb_false);
+        },
         PatternTy::Tuple(patterns) => {
             for (i,sp) in patterns.iter().enumerate() {
                 let bb_next = self.output.new_block();
                 self.match_pattern(sp, value.field(i), bb_next, bb_false);
                 self.output.start_block(bb_next);
             }
+            self.output.end_block(super::Terminator::Goto(bb_true.into()))
             },
         }
-        self.output.end_block(super::Terminator::Goto(bb_true.into()))
 
     }
     pub fn destructure_pattern(&mut self, pattern: &crate::ast::Pattern, value: super::Value) {
         use crate::ast::pattern::PatternTy;
         match &pattern.ty {
         PatternTy::Any => {},
-        PatternTy::Multiple(_) => todo!(),
+        PatternTy::Multiple(_) => todo!("Destructure multiple"),
         PatternTy::MaybeBind(_) => unreachable!("Should have been resolved"),
         PatternTy::ValueSingle(_) => {},
         PatternTy::ValueRangeIncl(_, _) => {},
