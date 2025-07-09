@@ -605,10 +605,16 @@ fn visit_block(out_state: &mut State, return_ptr: Option<cr_ir::Value>, block_id
             (CmpOp::Ne, _) => IntCC::NotEqual,
             (CmpOp::Lt, Some(true )) => IntCC::SignedLessThan,
             (CmpOp::Lt, Some(false)) => IntCC::UnsignedLessThan,
-            (CmpOp::Le, _) => todo!(),
-            (CmpOp::Gt, _) => todo!(),
-            (CmpOp::Ge, _) => todo!(),
+            (CmpOp::Le, Some(true )) => IntCC::SignedLessThanOrEqual,
+            (CmpOp::Le, Some(false)) => IntCC::UnsignedLessThanOrEqual,
+            (CmpOp::Gt, Some(true )) => IntCC::SignedGreaterThan,
+            (CmpOp::Gt, Some(false)) => IntCC::UnsignedGreaterThan,
+            (CmpOp::Ge, Some(true )) => IntCC::SignedGreaterThanOrEqual,
+            (CmpOp::Ge, Some(false)) => IntCC::UnsignedGreaterThanOrEqual,
             (CmpOp::Lt, None) => panic!("Comparison on non-integer-alike"),
+            (CmpOp::Le, None) => panic!("Comparison on non-integer-alike"),
+            (CmpOp::Gt, None) => panic!("Comparison on non-integer-alike"),
+            (CmpOp::Ge, None) => panic!("Comparison on non-integer-alike"),
         };
         let x = out_state.read_value_single(lhs);
         let y = out_state.read_value_single(rhs);
