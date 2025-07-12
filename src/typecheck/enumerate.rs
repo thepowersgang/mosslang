@@ -358,7 +358,7 @@ impl<'a, 'b> crate::ast::ExprVisitor for RuleEnumerate<'a, 'b> {
                     &self.local_tys[*idx as usize]
                 },
                 ValueBinding::Function(absolute_path) => {
-                    //self.lc.functions.get(&absolute_path).expect("Incorrect function path")
+                    let fcn = self.lc.functions.get(&absolute_path).expect("Incorrect function path");
                     todo!("Function pointer")
                 },
                 ValueBinding::Static(absolute_path) => {
@@ -383,7 +383,9 @@ impl<'a, 'b> crate::ast::ExprVisitor for RuleEnumerate<'a, 'b> {
         ExprKind::CallPath(_, value_binding, args) => {
             let Some(value_binding) = value_binding else { panic!("Unresolved Callpath") };
             match value_binding {
-            ValueBinding::Local(_) => todo!("call local"),
+            ValueBinding::Local(_)
+            |ValueBinding::Static(_)
+            |ValueBinding::Constant(_) => todo!("call value?"),
             ValueBinding::Function(absolute_path)
             //|ValueBinding::StructValue(absolute_path)
             |ValueBinding::DataEnumVariant(absolute_path, _) => {
@@ -406,9 +408,10 @@ impl<'a, 'b> crate::ast::ExprVisitor for RuleEnumerate<'a, 'b> {
                 }
             },
             ValueBinding::ValueEnumVariant(_, _) => panic!("Call of a value enum variant"),
-            ValueBinding::Static(absolute_path) => todo!(),
-            ValueBinding::Constant(absolute_path) => todo!(),
             }
+        },
+        ExprKind::CallValue(expr, exprs) => {
+            todo!("CallValue")
         },
         ExprKind::Tuple(exprs) => {
             let ty = Type::new_tuple( expr.span.clone(), exprs.iter().map(|e| e.data_ty.clone()).collect() );
@@ -491,7 +494,6 @@ impl<'a, 'b> crate::ast::ExprVisitor for RuleEnumerate<'a, 'b> {
             }
             }
         },
-        ExprKind::CallValue(expr, exprs) => todo!("CallValue"),
         ExprKind::Loop { body } => {
             if let Some(res) = &body.result {
                 self.equate_types(&expr.span, &Type::new_unit(expr.span.clone()), &res.data_ty);

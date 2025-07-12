@@ -142,7 +142,7 @@ impl<'a> ::std::fmt::Display for F<'a, super::Value> {
         Value::StringLiteral(string_literal) => write!(f, "{:?}", string_literal),
         Value::IntegerLiteral(v, ty) => write!(f, "{:#x} /*{:?}*/", v, ty),
         Value::FunctionPointer(path, super::FunctionPointerTy::Function) => write!(f, "{}", path),
-        Value::FunctionPointer(path, super::FunctionPointerTy::Struct) => write!(f, "{}", path),
+        //Value::FunctionPointer(path, super::FunctionPointerTy::Struct) => write!(f, "{}", path),
         Value::FunctionPointer(path, super::FunctionPointerTy::DataEnum(idx)) => write!(f, "{}#{}", path, idx),
         }
     }

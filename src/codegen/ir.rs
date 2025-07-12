@@ -48,7 +48,7 @@ impl Value {
 #[derive(Debug,Clone)]
 pub enum FunctionPointerTy {
     Function,
-    Struct,
+    //Struct,
     DataEnum(usize),
 }
 

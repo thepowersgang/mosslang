@@ -219,9 +219,9 @@ impl<'a,'b> Visitor<'a,'b> {
                         self.output.end_block(Terminator::CallPath { dst: rv, path: absolute_path, args: a, tgt: next_block.into() });
                         self.output.start_block(next_block);
                     },
-                    crate::codegen::ir::FunctionPointerTy::Struct => {
-                        self.output.push_stmt(Operation::CreateComposite(rv, Some(absolute_path), a));
-                    },
+                    //crate::codegen::ir::FunctionPointerTy::Struct => {
+                    //    self.output.push_stmt(Operation::CreateComposite(rv, Some(absolute_path), a));
+                    //},
                     crate::codegen::ir::FunctionPointerTy::DataEnum(idx) => {
                         self.output.push_stmt(Operation::CreateDataVariant(rv, absolute_path, idx, a));
                     }
