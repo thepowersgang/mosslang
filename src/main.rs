@@ -20,6 +20,10 @@ struct Options
     #[options(short="o"/*, required*/)]
     output: Option<::std::path::PathBuf>,
 }
+#[cfg(target_os="linux")]
+const ISA_NAME: &str = "x86_64-elf";
+#[cfg(target_os="windows")]
+const ISA_NAME: &str = "x86_64-windows";
 
 fn main() {
     let args: Options = ::gumdrop::Options::parse_args_default_or_exit();
@@ -51,7 +55,7 @@ fn main() {
             p
             },
         };
-    match codegen::generate(&output_path, ast_crate) {
+    match codegen::generate(&output_path, ISA_NAME, ast_crate) {
     Ok( () ) => {}
     Err(e) => todo!("Handle error from codegen: {:?}", e),
     }

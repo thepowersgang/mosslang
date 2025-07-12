@@ -27,11 +27,11 @@ struct InnerState<'a> {
     types_cache: ::std::cell::RefCell< ::std::collections::BTreeMap< crate::ast::Type, type_info::TypeInfoRef > >,
 }
 
-pub fn generate(output: &::std::path::Path, krate: crate::ast::Crate) -> Result<(),::std::io::Error>
+pub fn generate(output: &::std::path::Path, isa_name: &str, krate: crate::ast::Crate) -> Result<(),::std::io::Error>
 {
     let mut state = State {
         #[cfg(feature="cranelift")]
-        out: backend_cranelift::Context::new(output, "x86_64-elf"),
+        out: backend_cranelift::Context::new(output, isa_name),
         ofp_bare_ir: ::std::fs::File::create(output.with_extension("moss_ir"))?,
         ofp_ssa_ir: ::std::fs::File::create(output.with_extension("moss_ssa"))?,
         inner: InnerState::default(),
