@@ -6,21 +6,26 @@ use crate::ast::ty::TypeKind;
 use std::convert::TryFrom;
 
 use cr_ir::InstBuilder as _;
+use cranelift_module::Module as _;
 
 pub struct Context
 {
     ofp: ::std::fs::File,
     module: ::cranelift_object::ObjectModule,
-    functions: ::std::collections::HashMap<AbsolutePath, (cr_ir::UserFuncName, DeclaredValueItem)>,
+    functions: ::std::collections::HashMap<AbsolutePath, DeclaredFunction>,
+    statics: ::std::collections::HashMap<AbsolutePath, DeclaredStatic>,
     string_count: usize,
 }
-enum DeclaredValueItem {
-    Function {
-        sig: cr_ir::Signature,
-        indirect_return: bool,
-        variadic_after: Option<usize>,
-    },
-    ExternStatic,
+struct DeclaredFunction {
+    cr_name: cr_ir::UserFuncName,
+    def_id: cranelift_module::FuncId,
+    sig: cr_ir::Signature,
+    indirect_return: bool,
+    variadic_after: Option<usize>,
+}
+struct DeclaredStatic {
+    cr_name: cr_ir::UserFuncName,
+    //def_id: cranelift_module::DataId,
 }
 
 impl Context
@@ -41,17 +46,19 @@ impl Context
             ofp: ::std::fs::File::create(output_path).unwrap(),
             module: ::cranelift_object::ObjectModule::new(builder),
             functions: Default::default(),
+            statics: Default::default(),
             string_count: 0,
         }
     }
     pub fn finalise(mut self) -> Result<(),::std::io::Error> {
         use std::io::Write;
-        self.ofp.write_all(&self.module.finish().emit().expect("Error emitting"))?;
+        let blob = self.module.finish().emit().expect("Error emitting");
+        self.ofp.write_all(&blob)?;
         Ok( () )
     }
 
     /// Forward-declare a function, allowing Cranelift generation to know its signature
-    pub fn declare_function(&mut self, state: &super::InnerState, path: AbsolutePath, fcn_sig: &crate::ast::items::FunctionSignature) {
+    pub fn declare_function(&mut self, state: &super::InnerState, path: AbsolutePath, fcn_sig: &crate::ast::items::FunctionSignature, is_extern: bool) {
         let indirect_return;
         let sig = {
             let mut sig = cr_ir::Signature::new(cranelift_codegen::isa::CallConv::SystemV);
@@ -68,43 +75,43 @@ impl Context
             }
             sig
             };
-        let name = cr_ir::UserFuncName::user(0, self.functions.len() as u32);
+        let linkage = if is_extern {
+            cranelift_module::Linkage::Import
+        }
+        else {
+            cranelift_module::Linkage::Export
+        };
+        let def_id = self.module.declare_function(&mangle_path(&path), linkage, &sig).expect("declare_function");
+        //let cr_name = self.allocate_user_func_name();
+        let cr_name = cr_ir::UserFuncName::user(0, def_id.as_u32());
         let variadic_after = fcn_sig.is_variadic.then_some(fcn_sig.args.len());
-        self.functions.insert(path, (name, DeclaredValueItem::Function { sig, indirect_return, variadic_after }));
+        self.functions.insert(path, DeclaredFunction { cr_name, def_id, sig, indirect_return, variadic_after });
     }
     /// Forward-declare a function, allowing Cranelift generation to know its signature
     pub fn declare_external_static(&mut self, _state: &super::InnerState, path: AbsolutePath, _ty: &crate::ast::Type) {
-        let name = cr_ir::UserFuncName::user(0, self.functions.len() as u32);
-        self.functions.insert(path, (name, DeclaredValueItem::ExternStatic));
+        let def_id = self.module.declare_data(&mangle_path(&path), cranelift_module::Linkage::Import, false, false).expect("extern declare_data");
+        //let name = self.allocate_user_func_name();
+        let cr_name = cr_ir::UserFuncName::user(0, def_id.as_u32());
+        self.statics.insert(path, DeclaredStatic { cr_name/*, def_id*/ });
     }
     /// Lower the body of a function
     pub fn lower_function(&mut self, state: &super::InnerState, path: &AbsolutePath, ir: &super::ir::SsaExpr)
     {
+        use cranelift_module::Module;
         let ir = ir.get();
         let _i = INDENT.inc_f("lower_function", format_args!("{}", path));
-        let mut fn_builder_ctx = ::cranelift_frontend::FunctionBuilderContext::new();
-        let mangled_name = {
-            use std::fmt::Write;
-            let mut rv = String::new();
-            let _ = write!(&mut rv, "_ZM");
-            for v in &path.0 {
-                let _ = write!(&mut rv, "{}{}", v.len(), v);
-            }
-            rv
-        };
-        let Some(&(ref name, DeclaredValueItem::Function { ref sig, indirect_return, variadic_after: _ })) = self.functions.get(path) else { panic!("{} not defined as a function", path) };
-        let mut func = ::cranelift_codegen::ir::Function::with_name_signature(name.clone(), sig.clone());
+
+        let Some(&DeclaredFunction { ref cr_name, def_id, ref sig, indirect_return, variadic_after: _ }) = self.functions.get(path) else { panic!("{} not defined as a function", path) };
+        let mut func = ::cranelift_codegen::ir::Function::with_name_signature(cr_name.clone(), sig.clone());
     
+        let mut fn_builder_ctx = ::cranelift_frontend::FunctionBuilderContext::new();
         let mut builder = ::cranelift_frontend::FunctionBuilder::new(&mut func, &mut fn_builder_ctx);
         lower_function(&mut builder, self, state, ir, indirect_return);
         builder.finalize();
-        
-		let func_id = self.module.declare_function(&mangled_name, cranelift_module::Linkage::Export, &func.signature).unwrap();
 
 		let mut c = ::cranelift_codegen::Context::new();
 		c.func = func;
-        use cranelift_module::Module;
-		match self.module.define_function(func_id, &mut c)
+		match self.module.define_function(def_id, &mut c)
 		{
 		Ok(_) => {},
 		Err(::cranelift_module::ModuleError::Compilation(e)) => match e
@@ -981,7 +988,7 @@ impl<'ir, 'a, 'a1> State<'ir, 'a, 'a1> {
     }
 
     fn get_function(&mut self, path: &crate::ast::path::AbsolutePath, arg_count: usize, get_arg: &dyn Fn(usize)->&'ir ms_ir::Value) -> (cr_ir::FuncRef,bool,) {
-        let Some((name, DeclaredValueItem::Function { sig, variadic_after, indirect_return })) = self.ctxt.functions.get(path) else { panic!("{} not defined as a function" ,path) };
+        let Some(DeclaredFunction { cr_name, sig, variadic_after, indirect_return, .. }) = self.ctxt.functions.get(path) else { panic!("{} not defined as a function" ,path) };
         let mut sig = sig;
         let mut tmp_sig;
         // Handle variadic functions
@@ -994,7 +1001,7 @@ impl<'ir, 'a, 'a1> State<'ir, 'a, 'a1> {
             sig = &tmp_sig;
         }
         // TODO: Cache
-        let name = self.builder.func.declare_imported_user_function(name.get_user().unwrap().clone());
+        let name = self.builder.func.declare_imported_user_function(cr_name.get_user().unwrap().clone());
         // TODO: Cache
         let signature = self.builder.import_signature(sig.clone());
         let rv = self.builder.import_function(cr_ir::ExtFuncData {
@@ -1006,8 +1013,8 @@ impl<'ir, 'a, 'a1> State<'ir, 'a, 'a1> {
     }
     fn get_global(&mut self, path: &crate::ast::path::AbsolutePath) -> (&crate::ast::Type, cr_ir::GlobalValue) {
         let Some(ty) = self.outer_state.statics.get(path) else { panic!("Undefined static {}", path) };
-        let Some((name, DeclaredValueItem::ExternStatic)) = self.ctxt.functions.get(path) else { panic!("{} not defined as a static",path) };
-        let name = self.builder.func.declare_imported_user_function(name.get_user().unwrap().clone());
+        let Some(DeclaredStatic { cr_name, .. }) = self.ctxt.statics.get(path) else { panic!("{} not defined as a static",path) };
+        let name = self.builder.func.declare_imported_user_function(cr_name.get_user().unwrap().clone());
         let gv_base = self.builder.create_global_value(cr_ir::GlobalValueData::Symbol {
             name: cr_ir::ExternalName::User(name),
             offset: 0.into(),
@@ -1099,4 +1106,13 @@ fn is_type_complex(t: &crate::ast::Type) -> bool {
     else {
         false
     }
+}
+fn mangle_path(path: &AbsolutePath) -> String {
+    use std::fmt::Write;
+    let mut rv = String::new();
+    let _ = write!(&mut rv, "_ZM");
+    for v in &path.0 {
+        let _ = write!(&mut rv, "{}{}", v.len(), v);
+    }
+    rv
 }

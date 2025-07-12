@@ -32,8 +32,8 @@ pub fn generate(output: &::std::path::Path, krate: crate::ast::Crate) -> Result<
     let mut state = State {
         #[cfg(feature="cranelift")]
         out: backend_cranelift::Context::new(output, "x86_64-elf"),
-        ofp_bare_ir: ::std::fs::File::create(output.with_extension(".moss_ir"))?,
-        ofp_ssa_ir: ::std::fs::File::create(output.with_extension(".moss_ssa"))?,
+        ofp_bare_ir: ::std::fs::File::create(output.with_extension("moss_ir"))?,
+        ofp_ssa_ir: ::std::fs::File::create(output.with_extension("moss_ssa"))?,
         inner: InnerState::default(),
     };
     fn enum_module<'a>(state: &mut State<'a>, module: &'a crate::ast::items::Module, path: AbsolutePath) {
@@ -46,7 +46,7 @@ pub fn generate(output: &::std::path::Path, krate: crate::ast::Crate) -> Result<
                     match &item.ty {
                     ExternItemType::Function(v) => {
                         #[cfg(feature="cranelift")]
-                        state.out.declare_function(&state.inner, path.append(item.name.clone()), v);
+                        state.out.declare_function(&state.inner, path.append(item.name.clone()), v, true);
                     },
                     ExternItemType::Static(v) => {
                         state.inner.statics.insert(path.append(item.name.clone()), &v.ty);
@@ -72,7 +72,7 @@ pub fn generate(output: &::std::path::Path, krate: crate::ast::Crate) -> Result<
             },
             ItemType::Function(ref f) => {
                 #[cfg(feature="cranelift")]
-                state.out.declare_function(&state.inner, path.append(item.name.as_ref().unwrap().clone()), &f.sig);
+                state.out.declare_function(&state.inner, path.append(item.name.as_ref().unwrap().clone()), &f.sig, false);
             }
             _ => {},
             }
