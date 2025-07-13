@@ -1,4 +1,4 @@
-
+// cspell:ignore Punct rword
 use super::{lex,Lexer,Result};
 
 /// Helper: Optionally parse a path

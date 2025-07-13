@@ -1,3 +1,4 @@
+// cspell:ignore Punct rword
 use super::Result;
 use super::Lexer;
 use super::lex;

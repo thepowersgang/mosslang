@@ -1,4 +1,4 @@
-//! AST Items - Top level constructs (funtions, statics, ...)
+//! AST Items - Top level constructs (functions, statics, ...)
 use crate::Ident;
 
 #[derive(Default)]
@@ -75,7 +75,7 @@ pub struct Union
 pub struct Enum
 {
     pub variants: Vec<EnumVariant>,
-    /// Indicates taht the enum doesn't represent all possible values (and that users must consider non-mentioned values)
+    /// Indicates that the enum doesn't represent all possible values (and that users must consider non-mentioned values)
     pub is_incomplete: bool,
 }
 pub struct EnumVariant

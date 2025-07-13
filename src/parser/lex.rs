@@ -1,4 +1,5 @@
 //! Lexer - Convert files/strings into a sequence of tokens
+// cspell:ignore Punct rword
 
 // /*
 #[path="lex-new.rs"]
@@ -361,7 +362,7 @@ define_punct!{
     DoubleAmp => '&' '&',
     
     DoubleEqual => '=' '=',
-    ExlamEqual => '!' '=',
+    ExlamEqual => '!' '=',  // cspell:disable-line
     LtEqual => '<' '=',
     GtEqual => '>' '=',
     

@@ -1,4 +1,4 @@
-
+// cspell:ignore Punct
 use super::{lex,Lexer,Result};
 
 /// Parse a sequence of attributes

@@ -183,7 +183,7 @@ impl<'a,'b> Visitor<'a,'b> {
         ExprKind::CallPath(path, binding, exprs) => {
             let rv = self.output.allocate_slot(&expr.data_ty);
             let a: Vec<_> = exprs.iter().map(|e| self.visit_expr(e)).collect();
-            let Some(b) = binding else { panic!("Unresolved ExprKind::Callpath {:?}", path) };
+            let Some(b) = binding else { panic!("Unresolved ExprKind::CallPath {:?}", path) };
             use crate::ast::path::ValueBinding;
             match b {
             ValueBinding::Local(i) => panic!("{}: Unexpected CallPath on a value - #{}", expr.span, i),
@@ -429,12 +429,12 @@ impl<'a,'b> Visitor<'a,'b> {
             let rv = self.output.allocate_slot(&expr.data_ty);
 
             use crate::ast::expr::Expr;
-            fn binop(this: &mut Visitor, rv: super::LocalIndex, expr_l: &Expr, op: super::BinOp, expr_r: &Expr) {
+            fn bin_op(this: &mut Visitor, rv: super::LocalIndex, expr_l: &Expr, op: super::BinOp, expr_r: &Expr) {
                 let v_l = this.visit_expr(expr_l);
                 let v_r = this.visit_expr(expr_r);
                 this.output.push_stmt(Operation::BinOp(rv, v_l, op, v_r))
             }
-            fn bitshift(this: &mut Visitor, rv: super::LocalIndex, expr_l: &Expr, op: super::BitShift, expr_r: &Expr) {
+            fn bit_shift(this: &mut Visitor, rv: super::LocalIndex, expr_l: &Expr, op: super::BitShift, expr_r: &Expr) {
                 let v_l = this.visit_expr(expr_l);
                 let v_r = this.visit_expr(expr_r);
                 this.output.push_stmt(Operation::BitShift(rv, v_l, op, v_r))
@@ -460,18 +460,18 @@ impl<'a,'b> Visitor<'a,'b> {
 
             use crate::ast::expr::BinOpTy;
             match bin_op_ty {
-            BinOpTy::Add => binop(self, rv, expr_l, super::BinOp::Add, expr_r),
-            BinOpTy::Sub => binop(self, rv, expr_l, super::BinOp::Sub, expr_r),
-            BinOpTy::Mul => binop(self, rv, expr_l, super::BinOp::Mul, expr_r),
-            BinOpTy::Div => binop(self, rv, expr_l, super::BinOp::Div, expr_r),
-            BinOpTy::Rem => binop(self, rv, expr_l, super::BinOp::Rem, expr_r),
+            BinOpTy::Add => bin_op(self, rv, expr_l, super::BinOp::Add, expr_r),
+            BinOpTy::Sub => bin_op(self, rv, expr_l, super::BinOp::Sub, expr_r),
+            BinOpTy::Mul => bin_op(self, rv, expr_l, super::BinOp::Mul, expr_r),
+            BinOpTy::Div => bin_op(self, rv, expr_l, super::BinOp::Div, expr_r),
+            BinOpTy::Rem => bin_op(self, rv, expr_l, super::BinOp::Rem, expr_r),
 
-            BinOpTy::BitAnd => binop(self, rv, expr_l, super::BinOp::BitAnd, expr_r),
-            BinOpTy::BitOr  => binop(self, rv, expr_l, super::BinOp::BitOr , expr_r),
-            BinOpTy::BitXor => binop(self, rv, expr_l, super::BinOp::BitXor, expr_r),
+            BinOpTy::BitAnd => bin_op(self, rv, expr_l, super::BinOp::BitAnd, expr_r),
+            BinOpTy::BitOr  => bin_op(self, rv, expr_l, super::BinOp::BitOr , expr_r),
+            BinOpTy::BitXor => bin_op(self, rv, expr_l, super::BinOp::BitXor, expr_r),
 
-            BinOpTy::Shl => bitshift(self, rv, expr_l, super::BitShift::Left , expr_r),
-            BinOpTy::Shr => bitshift(self, rv, expr_l, super::BitShift::Right, expr_r),
+            BinOpTy::Shl => bit_shift(self, rv, expr_l, super::BitShift::Left , expr_r),
+            BinOpTy::Shr => bit_shift(self, rv, expr_l, super::BitShift::Right, expr_r),
             
             BinOpTy::Equals    => cmp(self, rv, expr_l, super::CmpOp::Eq, expr_r),
             BinOpTy::NotEquals => cmp(self, rv, expr_l, super::CmpOp::Ne, expr_r),

@@ -6,7 +6,7 @@ use crate::INDENT;
 
 #[derive(Default)]
 struct LookupCache {
-    type_alises: HashMap<AbsolutePath, crate::ast::Type>,
+    type_aliases: HashMap<AbsolutePath, crate::ast::Type>,
 }
 
 pub fn resolve(ast_crate: &mut crate::ast::Crate)
@@ -27,7 +27,7 @@ fn fill_lc(lc: &mut LookupCache, module: &crate::ast::items::Module, path: Absol
         match &i.ty {
         //ItemType::Module(module) => fill_lc(lc, module),
         ItemType::TypeAlias(ty) => {
-            lc.type_alises.insert(path.append(i.name.as_ref().unwrap().clone()), ty.clone());
+            lc.type_aliases.insert(path.append(i.name.as_ref().unwrap().clone()), ty.clone());
         },
         _ => {},
         }
@@ -249,7 +249,7 @@ impl<'a> Context<'a> {
             if let crate::ast::ty::TypePath::Unresolved(raw_path) = path {
                 let r = resolve_path_type(self.item_scope, &ty.span, raw_path);
                 if let TypeBinding::Alias(t) = r {
-                    let a = self.item_scope.lc.type_alises.get(&t).expect("Missing TypeAlias");
+                    let a = self.item_scope.lc.type_aliases.get(&t).expect("Missing TypeAlias");
                     *ty = a.clone();
                     // Recurse
                     self.resolve_type(ty);
@@ -330,7 +330,7 @@ fn value_binding_to_named_pattern(span: &crate::parser::lex::Span, vb: ValueBind
 }
 impl crate::ast::ExprVisitor for Context<'_> {
     fn visit_mut_pattern(&mut self, p: &mut crate::ast::Pattern, refutable: bool) {
-        println!("{INDENT}Patern: {:?}", p);
+        println!("{INDENT}visit_mut_pattern: {:?}", p);
         for b in &mut p.bindings {
             b.index = Some(self.define_var(&b.name));
         }

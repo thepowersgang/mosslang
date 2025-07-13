@@ -1,6 +1,7 @@
 //! Apply pre-compilation rules
 //! 
 //! Currently just `cfg` flags
+// cspell:ignore krate
 
 pub fn expand_crate(krate: &mut super::ast::Crate)
 {

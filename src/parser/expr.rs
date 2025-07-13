@@ -1,4 +1,4 @@
-
+// cspell:ignore Punct rword parse_expr_nostruct
 use super::lex::{Token, ReservedWord, Punct};
 use crate::ast::expr as e;
 use crate::INDENT;
@@ -133,14 +133,14 @@ macro_rules! def_left_assoc {
 
     }
 }
-macro_rules! def_binops {
+macro_rules! def_bin_ops {
     ( $($name:ident { $($p:ident => $op:ident),* });* ; -> $next:ident  ) => {
-        def_binops!{ @outer $($name )* $next; $({ $($p => $op),* })* }
+        def_bin_ops!{ @outer $($name )* $next; $({ $($p => $op),* })* }
     };
     ( @outer $next:ident ; ) => {};
     ( @outer $name:ident $next:ident $($others:ident)*; $blk:tt $($other_blocks:tt)* ) => {
-        def_binops!{ @inner $name,$next $blk }
-        def_binops!{ @outer $next $($others)*; $($other_blocks)* }
+        def_bin_ops!{ @inner $name,$next $blk }
+        def_bin_ops!{ @outer $next $($others)*; $($other_blocks)* }
     };
     ( @inner $name:ident,$next:ident { $($p:ident => $op:ident),* } ) => {
         def_left_assoc!{$name, $next, v1,v2 => {
@@ -152,13 +152,13 @@ macro_rules! def_binops {
 fn parse_expr_assign(lex: &mut super::Lexer) -> super::Result<e::Expr> {
     use crate::ast::expr::AssignOp;
     let ps = lex.start_span();
-    let lhs = parse_binops_root(lex)?;
+    let lhs = parse_bin_ops_root(lex)?;
     fn op_equals(lex: &mut super::Lexer, ps: super::lex::ProtoSpan, lhs: e::Expr, op: Option<AssignOp>) -> super::Result<e::Expr> {
         lex.consume();
         Ok(e::ExprKind::Assign {
             slot: Box::new(lhs),
             op,
-            value: Box::new(parse_binops_root(lex)?),
+            value: Box::new(parse_bin_ops_root(lex)?),
         }.to_expr(lex.end_span(&ps)))
     }
     match lex.peek_no_eof()? {
@@ -176,11 +176,11 @@ fn parse_expr_assign(lex: &mut super::Lexer) -> super::Result<e::Expr> {
     _ => Ok(lhs),
     }
 }
-fn parse_binops_root(lex: &mut super::Lexer) -> super::Result<e::Expr> {
+fn parse_bin_ops_root(lex: &mut super::Lexer) -> super::Result<e::Expr> {
     parse_expr_bool_or(lex)
 }
 // - Ranges
-def_binops!{
+def_bin_ops!{
     // - Boolean OR, Boolean AND
     parse_expr_bool_or { DoublePipe => BoolOr, DoubleAmp => BoolAnd };
     // - Equalities
@@ -188,13 +188,13 @@ def_binops!{
     // - Orderings
     parse_expr_cmp {
         DoubleEqual => Equals,
-        ExlamEqual => NotEquals,
+        ExlamEqual => NotEquals,    // spell:disable-line
         Lt => Lt,
         Gt => Gt,
         LtEqual => LtEquals,
         GtEqual => GtEquals
     };
-    // - Biwise (OR, XOR, AND)
+    // - Bitwise (OR, XOR, AND)
     parse_expr_bitor  { Pipe  => BitOr  };
     parse_expr_bitxor { Caret => BitXor };
     parse_expr_bitand { Amp   => BitAnd };
@@ -206,7 +206,7 @@ def_binops!{
     parse_expr_mul { Star => Mul, Slash => Div, Percent => Rem };
     -> parse_expr_cast
 }
-// - Cast (can't use the binop code, as `as` is reserved word not a punctuation... and the rhs is a type)
+// - Cast (can't use the BinOp code, as `as` is reserved word not a punctuation... and the rhs is a type)
 fn parse_expr_cast(lex: &mut super::Lexer) -> super::Result<e::Expr> {
     let ps: super::lex::ProtoSpan = lex.start_span();
     let mut v = parse_expr_leading(lex)?;
@@ -242,7 +242,7 @@ fn parse_expr_leading(lex: &mut super::Lexer) -> super::Result<e::Expr> {
         parse_expr_trailing(lex)?
     })
 }
-/// Trailing unaries (call, index, field)
+/// Trailing unary operations (call, index, field)
 fn parse_expr_trailing(lex: &mut super::Lexer) -> super::Result<e::Expr> {
     //let _i = INDENT.inc("parse_expr_trailing");
     let ps = lex.start_span();
@@ -476,7 +476,7 @@ fn parse_expr_value(lex: &mut super::Lexer) -> super::Result<e::Expr> {
             else_block
         }.to_expr(lex.end_span(&ps))
         },
-    // --- coditionals ---
+    // --- conditionals ---
     // `if cond { ... } [else if cond { ... }] [else { ... }]`
     Token::RWord(ReservedWord::If) => {
         lex.consume();

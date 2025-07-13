@@ -1,4 +1,5 @@
 //! Entirely custom lexer
+// cspell:ignore interner Punct
 
 use super::{Token,Punct};
 
@@ -33,7 +34,7 @@ impl ::std::fmt::Debug for Ident {
 }
 impl ::std::fmt::Display for Ident {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str( INTERNER.lock().unwrap().get_or_insert_default().resolve(self.0).unwrap_or("-BADSYM-") )
+        f.write_str( INTERNER.lock().unwrap().get_or_insert_default().resolve(self.0).unwrap_or("-BAD-SYM-") )
     }
 }
 
@@ -507,7 +508,7 @@ impl RawLexer
         println!(">> {:?}", String::from_utf8_lossy(&rv));
         Ok(rv)
     }
-    /// Advance, but painic if EOF is seen
+    /// Advance, but panic if EOF is seen
     fn advance_no_eof(&mut self) -> ::std::io::Result<char> {
         match self.advance()? {
         None => todo!("Unexpected EOF"),

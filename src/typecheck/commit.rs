@@ -1,4 +1,5 @@
 //! Apply the results of type checking/inference to the expression tree
+// cspell:ignore ivars ivar
 use crate::INDENT;
 use crate::ast::ty::{Type,TypeKind};
 

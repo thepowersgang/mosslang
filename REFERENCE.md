@@ -9,5 +9,5 @@
 ## Expressions and Statements (executed code)
 ```bnf
 block: '{'   '}'
-statement: block_expr ';' | expt ';' | 'let' pattern [':' type] ['=' expt]
+statement: block_expr ';' | expr ';' | 'let' pattern [':' type] ['=' expr]
 ```

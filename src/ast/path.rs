@@ -66,7 +66,7 @@ pub enum ValueBinding
     Constant(AbsolutePath),
     ///// Constructor for a tuple-like struct
     //StructValue(AbsolutePath),
-    /// Enum value - convertable to integer
+    /// Enum value - convertible to integer
     ValueEnumVariant(AbsolutePath, usize),
     /// Enum value - function pointer
     DataEnumVariant(AbsolutePath, usize),

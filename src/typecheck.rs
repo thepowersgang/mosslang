@@ -3,7 +3,7 @@ use crate::ast::path::AbsolutePath;
 use crate::ast::ty::Type;
 
 mod enumerate;
-mod ivars;
+mod ivars;  // cspell:disable-line
 mod run;
 mod commit;
 

@@ -1,6 +1,7 @@
 //! Implementation of the core typecheck/infer algorithm
 //! 
 //! I.e. [typecheck_expr]
+// cspell:ignore ivars ivar
 use crate::INDENT;
 use crate::ast::ty::{Type,TypeKind};
 use super::{enumerate,Rules,Revisit};
@@ -159,7 +160,7 @@ pub(super) fn typecheck_expr(lc: &super::LookupContext, ret_ty: &crate::ast::Typ
     super::commit::commit_to_expr(&mut ivars, expr);
 }
 
-/// Ivar possiblity rules
+/// Ivar possibility rules
 #[derive(Default)]
 struct IvarRules {
     ivars: std::collections::HashMap<usize, ::std::collections::BTreeSet<(Type, bool)>>,
@@ -241,8 +242,8 @@ fn check_revisit(ir: &mut IvarRules, lc: &super::LookupContext, ivars: &mut [sup
             // - Should probably make a `nullptr_t` type instead
             (_, TypeKind::Void) => R::Consume,
             _ => {
-                // Equate the inners, as the constness may have changed
-                // TODO: For better error messages, create a suitable type using the LHS's constness
+                // Equate the inners, as the const-ness may have changed
+                // TODO: For better error messages, create a suitable type using the LHS's const-ness
                 let i_l = (**i_l).clone();
                 let i_r = (**i_r).clone();
                 equate_types(span, ivars, &i_l, &i_r);
@@ -279,7 +280,7 @@ fn check_revisit(ir: &mut IvarRules, lc: &super::LookupContext, ivars: &mut [sup
         },
     Revisit::Index(val_ty, _index_ty) => {
         let mut val_ty = val_ty;
-        // Apply autoderef
+        // Apply auto-deref
         while let TypeKind::Pointer { inner, .. } = &get_ivar(&ivars, val_ty).kind {
             val_ty = &inner;
         }
@@ -325,8 +326,8 @@ fn check_revisit(ir: &mut IvarRules, lc: &super::LookupContext, ivars: &mut [sup
         match &ty.kind {
         TypeKind::Infer { .. } => R::Keep,
         TypeKind::Named(crate::ast::ty::TypePath::Resolved(TypeBinding::Alias(_))) => panic!("Unresolved type alias - {}", ty),
-        TypeKind::Tuple(flds) => {
-            let Some(fld_ty) = flds.get(*idx) else {
+        TypeKind::Tuple(fields) => {
+            let Some(fld_ty) = fields.get(*idx) else {
                 panic!("{span}: No field index {} on type {}", idx, ty);
             };
             let fld_ty = fld_ty.clone();
@@ -340,9 +341,9 @@ fn check_revisit(ir: &mut IvarRules, lc: &super::LookupContext, ivars: &mut [sup
         println!("Revisit::Add: {} + {}", get_ivar(&ivars, ty_l), get_ivar(&ivars, ty_r));
         let ty_li = get_ivar(&ivars, ty_l);
         let ty_ri = get_ivar(&ivars, ty_r);
-        let ikind_l = get_infer_kind(&ivars, ty_li);
-        let ikind_r = get_infer_kind(&ivars, ty_ri);
-        match (&ty_li.kind, ikind_l, &ty_ri.kind, ikind_r) {
+        let kind_l = get_infer_kind(&ivars, ty_li);
+        let kind_r = get_infer_kind(&ivars, ty_ri);
+        match (&ty_li.kind, kind_l, &ty_ri.kind, kind_r) {
         (TypeKind::Infer { .. }, InferType::None, _, _) => R::Keep,
         (TypeKind::Pointer { .. }, _, TypeKind::Infer { .. }, InferType::None) => R::Keep,
         (TypeKind::Pointer { .. }, _, TypeKind::Infer { .. }, InferType::Integer)
@@ -364,9 +365,9 @@ fn check_revisit(ir: &mut IvarRules, lc: &super::LookupContext, ivars: &mut [sup
         println!("Revisit::Sub: {} - {}", get_ivar(&ivars, ty_l), get_ivar(&ivars, ty_r));
         let ty_li = get_ivar(&ivars, ty_l);
         let ty_ri = get_ivar(&ivars, ty_r);
-        let ikind_l = get_infer_kind(&ivars, ty_li);
-        let ikind_r = get_infer_kind(&ivars, ty_ri);
-        match (&ty_li.kind, ikind_l, &ty_ri.kind, ikind_r) {
+        let kind_l = get_infer_kind(&ivars, ty_li);
+        let kind_r = get_infer_kind(&ivars, ty_ri);
+        match (&ty_li.kind, kind_l, &ty_ri.kind, kind_r) {
         (TypeKind::Infer { .. }, InferType::None, _, _) => R::Keep,
         (TypeKind::Pointer { .. }, _, TypeKind::Infer { .. }, InferType::None) => R::Keep,
         (TypeKind::Pointer { .. }, _, TypeKind::Pointer { .. }, _) => {

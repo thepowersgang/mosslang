@@ -1,4 +1,4 @@
-
+// cspell:ignore Punct
 use crate::ast::items::{Item,ItemType};
 
 use super::Result;

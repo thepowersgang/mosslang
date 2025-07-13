@@ -1,3 +1,4 @@
+// cspell:ignore Punct rword
 use super::Result;
 use super::Lexer;
 use super::lex;
@@ -9,15 +10,15 @@ pub fn parse_pattern(lex: &mut Lexer) -> Result<crate::ast::Pattern> {
     let ps = lex.start_span();
     let v = parse_pattern_inner(lex, Vec::new())?;
     if lex.opt_consume_punct(lex::Punct::Pipe)? {
-        let mut subpats = Vec::new();
-        subpats.push(v);
+        let mut sub_pats = Vec::new();
+        sub_pats.push(v);
         loop {
-            subpats.push( parse_pattern_inner(lex, Vec::new())? );
+            sub_pats.push( parse_pattern_inner(lex, Vec::new())? );
             if !lex.opt_consume_punct(lex::Punct::Pipe)? {
                 break;
             }
         }
-        Ok(make_pat(lex.end_span(&ps), Vec::new(), PatternTy::Multiple(subpats)))
+        Ok(make_pat(lex.end_span(&ps), Vec::new(), PatternTy::Multiple(sub_pats)))
     }
     else {
         Ok(v)
