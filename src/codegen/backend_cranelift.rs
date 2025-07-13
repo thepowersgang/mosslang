@@ -1,3 +1,5 @@
+// cspell:ignore ctxt CallConv
+// cspell:ignore default_libcall_names
 use crate::INDENT;
 use ::cranelift_codegen::ir::{self as cr_ir, AbiParam};
 use super::ir as ms_ir;
@@ -287,7 +289,7 @@ where
     // Pre-seal the first block
     out_state.builder.seal_block(out_state.blocks[0]);
     // Start lowering blocks
-    // - NOTE: Visit the blocks in approximate execution order, so variables are poulated before use
+    // - NOTE: Visit the blocks in approximate execution order, so variables are populated before use
     for block_idx in block_visit_order {
         visit_block(&mut out_state, return_ptr, block_idx);
     }
@@ -309,30 +311,22 @@ fn visit_block(out_state: &mut State, return_ptr: Option<cr_ir::Value>, block_id
         match stmt {
         Operation::Alloca { dst, ty } => {
             let ti = out_state.outer_state.type_info(ty);
-            out_state.variables[dst.0] = VariableValue::StackSlot(out_state.builder.create_sized_stack_slot(cr_ir::StackSlotData {
+            let ss = out_state.builder.create_sized_stack_slot(cr_ir::StackSlotData {
                 kind: cr_ir::StackSlotKind::ExplicitSlot,
                 size: ti.size() as u32,
                 align_shift: ti.align().trailing_zeros() as u8,
-            }));
+            });
+            out_state.variables[dst.0] = VariableValue::Value(out_state.builder.ins().stack_addr(out_state.ctxt.ptr_ty(), ss, 0));
         },
         Operation::AssignLocal(local_index, value) => {
             let value = out_state.read_value(value);
             match value {
             ReadValue::Empty => {},
             ReadValue::Single(value) => out_state.store_value(local_index, value),
-            ReadValue::Stack(src_ss, ty, src_ofs) => {
-                let ti = out_state.outer_state.type_info(&ty);
+            ReadValue::Memory(src, ty, src_ofs) => {
                 if let VariableValue::StackSlot(dst_ss) = out_state.variables[local_index.0] {
-                    // TODO: only do the below if the type isn't a primtive (e.g. borrowed)
-                    for i in 0 .. ti.size() / 4 {
-                        let value = out_state.builder.ins().stack_load(cr_ir::types::I32, src_ss, (src_ofs + i * 4) as i32);
-                        out_state.builder.ins().stack_store(value, dst_ss, (i * 4) as i32);
-                    }
-                    let ofs = ti.size() - ti.size() % 4;
-                    for i in 0 .. ti.size() % 4 {
-                        let value = out_state.builder.ins().stack_load(cr_ir::types::I8, src_ss, (src_ofs + ofs + i) as i32);
-                        out_state.builder.ins().stack_store(value, dst_ss, (ofs + i) as i32);
-                    }
+                    // TODO: only do the below if the type isn't a primitive (e.g. borrowed)
+                    out_state.copy_to_stack(dst_ss, 0, &ty, &src, src_ofs);
                 }
                 else {
                     todo!("Assign from a stack slot to non-slot")
@@ -348,9 +342,9 @@ fn visit_block(out_state: &mut State, return_ptr: Option<cr_ir::Value>, block_id
             ReadValue::Empty => {},
             ReadValue::Single(value) => {
                 out_state.builder.ins().store(flags, value, ptr, 0);
-            },
-            ReadValue::Stack(src_ss, ty, src_ofs) => {
-                todo!("AssignDeref - StackSlot value");
+                },
+            ReadValue::Memory(src, ty, src_ofs) => {
+                out_state.copy_to_memory(ptr, 0, flags, &ty, &src, src_ofs);
                 }
             }
         },
@@ -373,7 +367,7 @@ fn visit_block(out_state: &mut State, return_ptr: Option<cr_ir::Value>, block_id
                     match value {
                     ReadValue::Empty => {},
                     ReadValue::Single(value) => { out_state.builder.ins().stack_store(value, ss, fld.ofs as i32); },
-                    ReadValue::Stack(stack_slot, _, _) => todo!(),
+                    ReadValue::Memory(stack_slot, _, _) => todo!(),
                     }
                 }
             }
@@ -563,19 +557,8 @@ fn visit_block(out_state: &mut State, return_ptr: Option<cr_ir::Value>, block_id
             ReadValue::Single(value) => {
                 out_state.builder.ins().store(flags, value, return_ptr, 0);
                 },
-            ReadValue::Stack(src_ss, src_ty, src_ofs) => {
-                    let ti = out_state.outer_state.type_info(&src_ty);
-                    // TODO: respect alignment (do byte loads if alignment is `<4`)
-                    // TODO: only do the below if the type isn't a primtive (e.g. borrowed)
-                    for i in 0 .. ti.size() / 4 {
-                        let value = out_state.builder.ins().stack_load(cr_ir::types::I32, src_ss, (src_ofs + i * 4) as i32);
-                        out_state.builder.ins().store(flags, value, return_ptr, (i * 4) as i32);
-                    }
-                    let ofs = ti.size() - ti.size() % 4;
-                    for i in 0 .. ti.size() % 4 {
-                        let value = out_state.builder.ins().stack_load(cr_ir::types::I8, src_ss, (src_ofs + ofs + i) as i32);
-                        out_state.builder.ins().store(flags, value, return_ptr, (ofs + i) as i32);
-                    }
+            ReadValue::Memory(src, src_ty, src_ofs) => {
+                out_state.copy_to_memory(return_ptr, 0, flags, &src_ty, &src, src_ofs);
                 },
             }
             out_state.builder.ins().return_(&[]);
@@ -675,22 +658,36 @@ enum VariableValue {
 enum ReadValue {
     Empty,
     Single(cr_ir::Value),
-    Stack(cr_ir::StackSlot, crate::ast::Type, usize),
+    Memory(ReadValueMemorySrc, crate::ast::Type, usize),
     //Multiple,
 }
 impl ReadValue {
     fn into_iter(self, state: &mut State) -> impl Iterator<Item=cr_ir::Value> {
         match self {
         ReadValue::Empty => None,
-        ReadValue::Stack(ss, ty, ofs) => {
+        ReadValue::Memory(src, ty, ofs) => {
             match get_types(&ty) {
             TranslatedType::Empty => None,
-            TranslatedType::Single(ty) => Some( state.builder.ins().stack_load(ty, ss, ofs as i32) ),
+            TranslatedType::Single(ty) => Some(src.load(&mut state.builder, ty, ofs)),
             TranslatedType::Complex => todo!("into_iter for stack slot - non-trivial: {}", ty),
             }
         },
         ReadValue::Single(value) => Some(value),
         }.into_iter()
+    }
+}
+enum ReadValueMemorySrc {
+    Stack(cr_ir::StackSlot),
+    Memory(cr_ir::Value),
+}
+impl ReadValueMemorySrc {
+    fn load(&self, builder: &mut cranelift_frontend::FunctionBuilder, ty: cr_ir::Type, ofs: usize) -> cr_ir::Value {
+        let ofs = ofs as i32;
+        match self
+        {
+        ReadValueMemorySrc::Stack(ss) => builder.ins().stack_load(ty, *ss, ofs),
+        ReadValueMemorySrc::Memory(ptr) => builder.ins().load(ty, cr_ir::MemFlags::new(), *ptr, ofs),
+        }
     }
 }
 struct State<'ir, 'a, 'a1> {
@@ -706,6 +703,7 @@ impl<'ir, 'a, 'a1> State<'ir, 'a, 'a1> {
     where
         'ir: 'ty
     {
+        let start_ty = ty;
         let mut ofs_dyn = None;
         let mut ofs_fixed = 0;
         for w in wrappers.iter() {
@@ -742,7 +740,7 @@ impl<'ir, 'a, 'a1> State<'ir, 'a, 'a1> {
                     ofs_fixed += f.ofs;
                     ty = &inner_tys[idx];
                 },
-                _ => todo!("Get field offset for {ty} #{}", idx),
+                _ => todo!("Get field offset for {ty} #{} - {} {:?}", idx, start_ty, wrappers),
                 }
             },
             Wrapper::IndexBySlot(local_index) => {
@@ -800,7 +798,7 @@ impl<'ir, 'a, 'a1> State<'ir, 'a, 'a1> {
             match self.variables[local_index.0] {
             VariableValue::Unassigned => panic!("Unassigned slot? _{}", local_index.0),
             VariableValue::Empty => ReadValue::Empty,
-            VariableValue::StackSlot(stack_slot) => ReadValue::Stack(stack_slot, ty.clone(), 0),
+            VariableValue::StackSlot(stack_slot) => ReadValue::Memory(ReadValueMemorySrc::Stack(stack_slot), ty.clone(), 0),
             VariableValue::Value(value) => ReadValue::Single(value),
             }
         },
@@ -824,7 +822,7 @@ impl<'ir, 'a, 'a1> State<'ir, 'a, 'a1> {
             };
             let ptr = match self.variables[ptr.0] {
                 VariableValue::Unassigned => panic!("Unassigned slot? _{}", ptr.0),
-                VariableValue::Empty => panic!("Pointer was an empty value, shouldn't be possible - IR generaton error?"),
+                VariableValue::Empty => panic!("Pointer was an empty value, shouldn't be possible - IR generation error?"),
                 VariableValue::StackSlot(_) => todo!("Load a pointer from a stack slot (why did a pointer end up assigned an alloca?)"),
                 VariableValue::Value(value) => value,
                 };
@@ -837,7 +835,7 @@ impl<'ir, 'a, 'a1> State<'ir, 'a, 'a1> {
             match get_types(ty)
             {
             TranslatedType::Empty => todo!("Deref to empty type"),
-            TranslatedType::Complex => todo!("Deref to complex type, will need to memcpy to destination"),
+            TranslatedType::Complex => ReadValue::Memory(ReadValueMemorySrc::Memory(ptr), ty.clone(), ofs_fixed),
             TranslatedType::Single(cr_ty) => ReadValue::Single(self.builder.ins().load(cr_ty, flags, ptr, ofs_fixed as i32)),
             }
         },
@@ -870,14 +868,39 @@ impl<'ir, 'a, 'a1> State<'ir, 'a, 'a1> {
         {
         ReadValue::Empty => panic!("Expected a register-sized value, but got a zero-sized value: {:?}", value),
         ReadValue::Single(value) => value,
-        ReadValue::Stack(ss, ty, ofs) => {
+        ReadValue::Memory(src, ty, ofs) => {
             match get_types(&ty)
             {
             TranslatedType::Empty => panic!("Expected a register-sized value, but got a zero-sized value: {:?}: {}", value, ty),
-            TranslatedType::Single(cr_ty) => self.builder.ins().stack_load(cr_ty, ss, ofs as i32),
+            TranslatedType::Single(cr_ty) => src.load(&mut self.builder, cr_ty, ofs),
             TranslatedType::Complex => todo!("Complex type from `read_value_single`? {}", ty),
             }
             }
+        }
+    }
+
+    fn copy_to_stack(&mut self, dst_ss: cr_ir::StackSlot, dst_ofs: usize, ty: &crate::ast::Type, src: &ReadValueMemorySrc, src_ofs: usize) {
+        let ti = self.outer_state.type_info(ty);
+        for i in 0 .. ti.size() / 4 {
+            let value = src.load(&mut self.builder, cr_ir::types::I32, src_ofs + i * 4);
+            self.builder.ins().stack_store(value, dst_ss, (dst_ofs + i * 4) as i32);
+        }
+        let ofs = ti.size() - ti.size() % 4;
+        for i in 0 .. ti.size() % 4 {
+            let value = src.load(&mut self.builder, cr_ir::types::I8, src_ofs + ofs + i);
+            self.builder.ins().stack_store(value, dst_ss, (dst_ofs + ofs + i) as i32);
+        }
+    }
+    fn copy_to_memory(&mut self, ptr: cr_ir::Value, dst_ofs: usize, flags: cr_ir::MemFlags, ty: &crate::ast::Type, src: &ReadValueMemorySrc, src_ofs: usize) {
+        let ti = self.outer_state.type_info(ty);
+        for i in 0 .. ti.size() / 4 {
+            let value = src.load(&mut self.builder, cr_ir::types::I32, src_ofs + i * 4);
+            self.builder.ins().store(flags, value, ptr, (dst_ofs + i * 4) as i32);
+        }
+        let ofs = ti.size() - ti.size() % 4;
+        for i in 0 .. ti.size() % 4 {
+            let value = src.load(&mut self.builder, cr_ir::types::I8, src_ofs + ofs + i);
+            self.builder.ins().store(flags, value, ptr, (dst_ofs + ofs + i) as i32);
         }
     }
 

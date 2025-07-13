@@ -9,14 +9,15 @@ use super::visit::VisitorMut;
 pub fn from_expr(mut ir: super::Expr) -> super::Expr
 {
     let _i = INDENT.inc("ssa_ify");
-    // Allocas are needed if:
-    // - The variable is written twice
-    // - The variable is borrowed
+    // Need to handle the following:
+    // - Create `alloca`s if a variable is borrowed (as that requires taking a pointer to the variable)
+    // - Deconstruct multi-write values into separate SSA variables, joined by block parameters
     let borrowed;
     let twice_written;
     {
         struct VisitorEnum {
             borrowed: BitSet,
+            borrowed_mut: BitSet,
             written: BitSet,
             twice_written: BitSet,
         }
@@ -31,10 +32,13 @@ pub fn from_expr(mut ir: super::Expr) -> super::Expr
             fn operation(&mut self, addr: super::visit::Addr, op: &super::Operation) {
                 match op {
                 Operation::AssignDeref(_, _) => {},
-                Operation::BorrowLocal(local_index_dst, _is_mut, local_index_src, _wrappers) => {
-                    //if !self.borrowed.set(local_index_src.0) {
-                    //    println!("{INDENT}{local_index_src:?}: Borrowed @ {addr}",);
-                    //}
+                Operation::BorrowLocal(local_index_dst, is_mut, local_index_src, _wrappers) => {
+                    if *is_mut && !self.borrowed_mut.set(local_index_src.0) {
+                        println!("{INDENT}{local_index_src:?}: Borrowed mut @ {addr}",);
+                    }
+                    if !self.borrowed.set(local_index_src.0) {
+                        println!("{INDENT}{local_index_src:?}: Borrowed @ {addr}",);
+                    }
                     self.writes_slot(addr, local_index_dst);
                 },
                 _ => super::visit::visit_operation(self, addr, op),
@@ -43,14 +47,15 @@ pub fn from_expr(mut ir: super::Expr) -> super::Expr
         }
         let mut v = VisitorEnum {
             borrowed: BitSet::new(ir.locals.len()),
+            borrowed_mut: BitSet::new(ir.locals.len()),
             written: BitSet::new(ir.locals.len()),
             twice_written: BitSet::new(ir.locals.len()),
         };
         super::visit::visit_expr(&mut v, &ir);
-        VisitorEnum { borrowed, written: _, twice_written } = v;
+        VisitorEnum { borrowed, borrowed_mut: _, written: _, twice_written } = v;
     }
     
-    // For all of the multi-write values (and not borrowed), if they can be trivially turned into block params instead of making allocas
+    // For all of the multi-write values (and not borrowed), if they can be trivially turned into block params instead of making `alloca`s
     // - If all writes jump to the same block
     // - TODO: More complex versions - generate paths between writes and reads (de-duplicated to shortest).
     //   > Find common point and inject block params there
@@ -182,7 +187,7 @@ pub fn from_expr(mut ir: super::Expr) -> super::Expr
             {
                 let mut exit_table: Vec<_> = (0 .. ir.blocks.len()).map(|_| None).collect();
                 for (a,v) in remap_table.iter() {
-                    // Since `remap_table` abvoe is a BTreeMap, it's sorted - so later remaps come first. This means that if we overwrite the `exit_table` entry it'll be correct
+                    // Since `remap_table` above is a BTreeMap, it's sorted - so later remaps come first. This means that if we overwrite the `exit_table` entry it'll be correct
                     exit_table[a.addr.block_idx.0] = Some(*v);
                 }
                 let mut stack = Vec::new();
@@ -257,35 +262,35 @@ pub fn from_expr(mut ir: super::Expr) -> super::Expr
     }
     
     for (block_idx,block) in ir.blocks.iter_mut().enumerate() {
-        for (stmt_idx,stmt) in block.statements.iter_mut().enumerate() {
-            struct V<'a> {
-                alloca_needed: &'a BitSet,
+        struct V<'a> {
+            alloca_needed: &'a BitSet,
+        }
+        impl VisitorMut for V<'_> {
+            fn writes_slot(&mut self, _: super::visit::Addr, local_index: &mut super::LocalIndex) {
+                if self.alloca_needed.is_set(local_index.0) {
+                    todo!("update_write: Add a `_I = _new` after this statement");
+                }   
             }
-            impl VisitorMut for V<'_> {
-                fn writes_slot(&mut self, _: super::visit::Addr, local_index: &mut super::LocalIndex) {
-                    if self.alloca_needed.is_set(local_index.0) {
-                        todo!("update_write: Add a `_I = _new` after this statement");
-                    }   
+            fn reads_slot(&mut self, _: super::visit::Addr, local_index: &mut super::LocalIndex) {
+                if self.alloca_needed.is_set(local_index.0) {
+                    todo!("update_use: Add a `_new = _I` before this statement");
                 }
-                fn reads_slot(&mut self, _: super::visit::Addr, local_index: &mut super::LocalIndex) {
-                    if self.alloca_needed.is_set(local_index.0) {
-                        todo!("update_use: Add a `_new = _I` before this statement");
-                    }
-                }
+            }
 
-                fn reads_value(&mut self, addr: super::visit::Addr, value: &mut super::Value) {
-                    use crate::codegen::ir::Value;
-                    match value {
-                    Value::Local(local_index, wrapper_list) => {
-                        self.reads_wrappers(addr, wrapper_list);
-                        if self.alloca_needed.is_set(local_index.0) {
-                            *value = Value::Deref { ptr: *local_index, wrappers: ::std::mem::take(wrapper_list) };
-                        }
-                    },
-                    _ => super::visit::visit_value_mut(self, addr, value),
+            fn reads_value(&mut self, addr: super::visit::Addr, value: &mut super::Value) {
+                use crate::codegen::ir::Value;
+                match value {
+                Value::Local(local_index, wrapper_list) => {
+                    self.reads_wrappers(addr, wrapper_list);
+                    if self.alloca_needed.is_set(local_index.0) {
+                        *value = Value::Deref { ptr: *local_index, wrappers: ::std::mem::take(wrapper_list) };
                     }
+                },
+                _ => super::visit::visit_value_mut(self, addr, value),
                 }
             }
+        }
+        for (stmt_idx,stmt) in block.statements.iter_mut().enumerate() {
             let addr = super::visit::Addr { block_idx: super::BlockIndex(block_idx), stmt_idx };
             let mut v = V { alloca_needed: &alloca_needed };
             match stmt {
@@ -307,9 +312,26 @@ pub fn from_expr(mut ir: super::Expr) -> super::Expr
             },
             }
         }
+        {
+            let mut v = V { alloca_needed: &alloca_needed };
+            let addr = super::visit::Addr { block_idx: super::BlockIndex(block_idx), stmt_idx: !0 };
+            super::visit::visit_terminator_mut(&mut v, addr, &mut block.terminator);
+        }
     }
     new_ops.append(&mut ir.blocks[0].statements);
     ir.blocks[0].statements = new_ops;
+    
+    // Update local types for alloca'd locals
+    for slot in 0 .. ir.locals.len() {
+        if alloca_needed.is_set(slot) {
+            let ty = &mut ir.locals[slot];
+            let kind = ::std::mem::replace(&mut ty.kind, crate::ast::ty::TypeKind::Void);
+            ty.kind = crate::ast::ty::TypeKind::Pointer {
+                is_const: false,    // TODO: Get the mutability of borrows?
+                inner: Box::new(crate::ast::Type { span: ty.span.clone(), kind }),
+            };
+        }
+    }
 
     ir
 }
