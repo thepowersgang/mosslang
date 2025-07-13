@@ -1,3 +1,4 @@
+// cspell:ignore ivar ivars
 use crate::INDENT;
 use crate::ast::path::{AbsolutePath,ValueBinding};
 use crate::ast::ty::{Type,TypeKind};
@@ -279,7 +280,7 @@ impl<'a, 'b> crate::ast::ExprVisitor for RuleEnumerate<'a, 'b> {
             self.visit_mut_block(body);
             self.loop_stack.pop();
         },
-        // Everything else uses a generic vistor
+        // Everything else uses a generic visitor
         _ => crate::ast::visit_mut_expr(self, expr),
         }
 
@@ -292,12 +293,12 @@ impl<'a, 'b> crate::ast::ExprVisitor for RuleEnumerate<'a, 'b> {
             self.equate_block(&expr.span, &expr.data_ty, block);
         },
         ExprKind::LiteralString(_) => {
-            let type_cstring = Type::new_ptr(expr.span.clone(), true,
+            let type_c_string = Type::new_ptr(expr.span.clone(), true,
                 Type::new_array_unsized(expr.span.clone(),
                     Type::new_integer(expr.span.clone(), crate::ast::ty::IntClass::Signed(0))
                     )
                 );
-            self.equate_types(&expr.span, &expr.data_ty, &type_cstring);
+            self.equate_types(&expr.span, &expr.data_ty, &type_c_string);
         },
         ExprKind::LiteralInteger(_, int_lit_class) => {
             use crate::ast::expr::IntLitClass;
@@ -374,14 +375,14 @@ impl<'a, 'b> crate::ast::ExprVisitor for RuleEnumerate<'a, 'b> {
                 },
                 ValueBinding::ValueEnumVariant(absolute_path, _) => {
                     let ap = absolute_path.parent();
-                    tmp_ty = Type::new_path_resolved(expr.span.clone(), crate::ast::path::TypeBinding::ValueEnum(ap));;
+                    tmp_ty = Type::new_path_resolved(expr.span.clone(), crate::ast::path::TypeBinding::ValueEnum(ap));
                     &tmp_ty
                 },
                 };
             self.equate_types(&expr.span, &expr.data_ty, &t);
         },
         ExprKind::CallPath(_, value_binding, args) => {
-            let Some(value_binding) = value_binding else { panic!("Unresolved Callpath") };
+            let Some(value_binding) = value_binding else { panic!("Unresolved CallPath") };
             match value_binding {
             ValueBinding::Local(_)
             |ValueBinding::Static(_)
@@ -484,7 +485,7 @@ impl<'a, 'b> crate::ast::ExprVisitor for RuleEnumerate<'a, 'b> {
                 self.make_coerce(&expr.span, Type::new_bool(expr.span.clone()), expr_r);
                 self.equate_types(&expr.span, &expr.data_ty, &Type::new_bool(expr.span.clone()));
             },
-            // Add and subtract need special logic for pointer arithmatic
+            // Add and subtract need special logic for pointer arithmetic
             BinOpTy::Add => self.push_revisit(&expr.span, &expr.data_ty, Revisit::Add(expr_l.data_ty.clone(), expr_r.data_ty.clone())),
             BinOpTy::Sub => self.push_revisit(&expr.span, &expr.data_ty, Revisit::Sub(expr_l.data_ty.clone(), expr_r.data_ty.clone())),
             // Everything else just coerces RHS to LHS and returns LHS

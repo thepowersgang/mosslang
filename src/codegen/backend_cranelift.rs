@@ -1,5 +1,8 @@
-// cspell:ignore ctxt CallConv
+// cspell:ignore ctxt
+// cspell:ignore CallConv condcodes
 // cspell:ignore default_libcall_names
+// cspell:ignore iadd isub imul idiv ineg ushr ireduce sextend uextend brif iconst
+// cspell:ignore set_notrap with_notrap
 use crate::INDENT;
 use ::cranelift_codegen::ir::{self as cr_ir, AbiParam};
 use super::ir as ms_ir;
@@ -859,7 +862,7 @@ impl<'ir, 'a, 'a1> State<'ir, 'a, 'a1> {
             Ok(v) => ReadValue::Single(self.builder.ins().iconst(get_int_ty(int_cls), v as i64)),
             Err(_) => todo!("big integer literal"),
             },
-        Value::FunctionPointer(absolute_path, function_pointer_ty) => todo!(),
+        Value::FunctionPointer(absolute_path, function_pointer_ty) => todo!(),//ReadValue::Single(self.builder.ins().func_addr(self.ctxt.ptr_ty(), self.ctxt.functions[absolute_path].def_id)),
         }
     }
     /// Read a trivial value (must fit into a register), helper for number ops
@@ -1102,7 +1105,7 @@ fn get_types(ty: &crate::ast::Type) -> TranslatedType {
         match b {
         TypeBinding::Alias(_) => panic!("Unresolved alias {:?}", ty),
         TypeBinding::EnumVariant(_, _) => todo!("Type bound to enum variant? {:?}", ty),
-        // TODO: Structs and unions could be tagged with `#[repr(transparent)]` or otherwise only contain a single non-complex field, and thus fit in a register
+        // TODO: Structs and unions could be tagged with transparent representation or otherwise only contain a single non-complex field, and thus fit in a register
         TypeBinding::Union(_absolute_path) => TranslatedType::Complex,
         TypeBinding::Struct(_absolute_path) => TranslatedType::Complex,
         TypeBinding::ValueEnum(_) => TranslatedType::Single(t::I32),

@@ -1,6 +1,7 @@
 
 // TODO: What sort of backend? Simple assembly? an IR?
 // Cranelift probably
+// cspell:ignore krate repr
 use crate::INDENT;
 use crate::ast::path::AbsolutePath;
 use ::std::collections::HashMap;

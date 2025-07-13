@@ -1,3 +1,4 @@
+// cspell:ignore ivar ivars
 use crate::INDENT;
 use crate::ast::ty::{Type,TypeKind};
 

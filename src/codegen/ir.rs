@@ -20,7 +20,7 @@ pub enum Value {
     ImplicitUnit,
     /// Value stored in a local variable
     Local(LocalIndex, WrapperList),
-    /// Value in a gloabl variable
+    /// Value in a global variable
     Named(AbsolutePath, WrapperList),
     /// Dereference a pointer and then apply wrappers
     Deref { ptr: LocalIndex, wrappers: WrapperList },
