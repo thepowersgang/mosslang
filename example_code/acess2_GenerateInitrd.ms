@@ -7,8 +7,9 @@ struct FILE { ... }
 const SEEK_END: i32 = -1;
 extern "C" {
 	fn perror(msg: *const c_STR);
+	fn printf(fmt: *const c_STR, ...);
 	fn fprintf(_: *mut FILE, fmt: *const c_STR, ...);
-	static stderr: *mut FILE;
+	//static stderr: *mut FILE;
 	fn fopen(path: *const c_STR, mode: *const c_STR) -> *mut FILE;
 	fn fseek(fp: *mut FILE, ofs: i64, dir: i32);
 	fn ftell(fp: *mut FILE) -> u64;
@@ -24,7 +25,6 @@ extern "C" {
 	fn strcpy(d: *mut c_STR, s: *const c_STR) -> *mut c_STR;
 	fn strstr(s1: *const c_STR, s2: *const c_STR) -> *const c_STR;
 	fn strchr(s1: *const c_STR, c: c_char) -> *const c_STR;
-	fn strrstr(s1: *const c_STR, s2: *const c_STR) -> *const c_STR;
 	fn strrchr(s1: *const c_STR, c: c_char) -> *const c_STR;
 	fn memcmp(s1: *const void, s2: *const void, count: usize) -> i32;
 	fn memcpy(dst: *mut void, src: *const void, count: usize) -> *mut void;
@@ -35,7 +35,7 @@ extern "C" {
 	fn malloc(size: usize) -> *mut void;	// TODO: Make a type that can be coerced to anything (`void` can coerce _from_ anything)
 	fn realloc(old: *mut void, size: usize) -> *mut void;
 	fn free(ptr: *const void);
-	static errno: i32;
+	//static errno: i32;
 
 	// ctype.h
 	fn isalnum(ch: i32) -> bool;
@@ -86,6 +86,7 @@ extern "C" fn main(argc: usize, argv: *const [*const c_STR; ...]) -> i32 {
 	
 	for arg_i in 1 .. argc
 	{
+		printf("arg_i=%i\n\0", arg_i);
 		let arg = argv[arg_i];
 		if arg[0] != '-' {
 			if infile == 0p {
@@ -101,12 +102,14 @@ extern "C" fn main(argc: usize, argv: *const [*const c_STR; ...]) -> i32 {
 				outfile_dep = arg;
 			}
 			else {
-				fprintf(stderr, "Unexpected free argument\n");
+				//fprintf(stderr, "Unexpected free argument\n");
+				printf("Unexpected free argument\n");
 				return 1;
 			}
 		}
 		else {
-			fprintf(stderr, "Unexpected argument\n");
+			//fprintf(stderr, "Unexpected argument\n");
+			printf("Unexpected argument\n");
 			return 1;
 		}
 	}
@@ -278,7 +281,8 @@ fn AddFile(os: *mut OutState, dents: *mut DirEnts, is_opt: bool, name: *const c_
 				return ;
 			}
 			else {
-				fprintf(stderr, "Couldn't open '%s': %s\n", realpath, strerror(errno));
+				//fprintf(stderr, "Couldn't open '%s': %s\n", realpath, strerror(errno));
+				printf("Couldn't open '%s': <REMOVED>\n", realpath);
 				exit(1);
 			}
 		}
@@ -358,7 +362,8 @@ fn expand_path(out: *mut c_STR, src: *const c_STR) -> usize {
 				rv += strlen(s);
 			}
 			else {
-				fprintf(stderr, "Encountered unknown replacement at '%s'\n", src);
+				//fprintf(stderr, "Encountered unknown replacement at '%s'\n", src);
+				printf("ERROR: Encountered unknown replacement at '%s'\n", src);
 				exit(1);
 			}
 		}
@@ -438,13 +443,15 @@ fn Lex_ConsumeYield(lex: *mut Lexer) -> *const c_STR
 }
 fn Lex_Error(lex: *const Lexer, string: *const c_STR)// -> !
 {
-	fprintf(stderr, "%s:%u: Parse error: %s\n", lex.*.filename, lex.*.cur_line, string);
+	//fprintf(stderr, "%s:%u: Parse error: %s\n", lex.*.filename, lex.*.cur_line, string);
+	printf("%s:%u: Parse error: %s\n", lex.*.filename, lex.*.cur_line, string);
 	exit(1);
 }
 fn Lex_Expect(lex: *const Lexer, exp: Token)
 {
 	if( lex.*.last_token != exp ) {
-		fprintf(stderr, "%s:%u: Unexpected token %i \"%s\", expected %i\n", lex.*.filename, lex.*.cur_line, lex.*.last_token, lex.*.string, exp);
+		//fprintf(stderr, "%s:%u: Unexpected token %i \"%s\", expected %i\n", lex.*.filename, lex.*.cur_line, lex.*.last_token, lex.*.string, exp);
+		printf("%s:%u: Unexpected token %i \"%s\", expected %i\n", lex.*.filename, lex.*.cur_line, lex.*.last_token, lex.*.string, exp);
 		exit(1);
 	}
 }
@@ -500,7 +507,8 @@ fn get_token_int(ifp: *mut FILE, string: *mut *const c_STR) -> Token {
 		loop {
 			ch = fgetc(ifp);
 			if ch < 0 {
-				fprintf(stderr, "ERROR: Unexpected EOF\n", ch);
+				//fprintf(stderr, "ERROR: Unexpected EOF\n", ch);
+				printf("ERROR: Unexpected EOF\n", ch);
 				break	// TODO: Error?
 			}
 			if ch == '"' {
@@ -518,7 +526,8 @@ fn get_token_int(ifp: *mut FILE, string: *mut *const c_STR) -> Token {
 	'{' => Token::BraceOpen,
 	'}' => Token::BraceClose,
 	_ => {
-		fprintf(stderr, "ERROR: Unexpected character '%c'\n", ch);
+		//fprintf(stderr, "ERROR: Unexpected character '%c'\n", ch);
+		printf("ERROR: Unexpected character '%c'\n", ch);
 		exit(1);
 		loop {}
 		}

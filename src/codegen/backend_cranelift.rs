@@ -39,7 +39,7 @@ impl Context
 			};
         let builder = ::cranelift_object::ObjectBuilder::new(
 				isa,
-				output_path.file_name().unwrap().as_encoded_bytes().to_owned(),//b"unknown_object.o"[..].to_owned(),
+				output_path.file_name().unwrap().as_encoded_bytes().to_owned(),
 				::cranelift_module::default_libcall_names(),
 				).expect("Can't create object builder");
         Context {
@@ -1108,11 +1108,17 @@ fn is_type_complex(t: &crate::ast::Type) -> bool {
     }
 }
 fn mangle_path(path: &AbsolutePath) -> String {
-    use std::fmt::Write;
-    let mut rv = String::new();
-    let _ = write!(&mut rv, "_ZM");
-    for v in &path.0 {
-        let _ = write!(&mut rv, "{}{}", v.len(), v);
+    // HACK: Only mangle if multiple entries
+    if path.0.len() != 1 {
+        use std::fmt::Write;
+        let mut rv = String::new();
+        let _ = write!(&mut rv, "_ZM");
+        for v in &path.0 {
+            let _ = write!(&mut rv, "{}{}", v.len(), v);
+        }
+        rv
     }
-    rv
+    else {
+        path.0[0].to_string()
+    }
 }

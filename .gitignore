@@ -9,6 +9,10 @@
 # Output artifacts
 # - Compiled object files
 example_code/*.o
+example_code/*.obj
+example_code/*.ilk
+example_code/*.exe
+example_code/*.pdb
 # - Raw IR
 example_code/*.moss_ir
 # - SSA IR

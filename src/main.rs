@@ -51,7 +51,12 @@ fn main() {
         Some(p) => p,
         None => {
             let mut p = args.root_file.clone();
-            p.set_extension("o");
+            if cfg!(target_os="windows") {
+                p.set_extension("obj");
+            }
+            else {
+                p.set_extension("o");
+            }
             p
             },
         };
@@ -59,6 +64,13 @@ fn main() {
     Ok( () ) => {}
     Err(e) => todo!("Handle error from codegen: {:?}", e),
     }
+
+    //::std::env::set_var("OPT_LEVEL", "1");
+    //let c = cc::Build::new()
+    //    .object(output_path)
+    //    .get_compiler()
+    //    .to_command();
+    //eprintln!("{:?}", c);
 }
 
 mod indent {
