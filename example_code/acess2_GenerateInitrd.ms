@@ -86,7 +86,6 @@ extern "C" fn main(argc: usize, argv: *const [*const c_STR; ...]) -> i32 {
 	
 	for arg_i in 1 .. argc
 	{
-		printf("arg_i=%i\n\0", arg_i);
 		let arg = argv[arg_i];
 		if arg[0] != '-' {
 			if infile == 0p {

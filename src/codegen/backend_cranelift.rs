@@ -66,7 +66,13 @@ impl Context
     pub fn declare_function(&mut self, state: &super::InnerState, path: AbsolutePath, fcn_sig: &crate::ast::items::FunctionSignature, is_extern: bool) {
         let indirect_return;
         let sig = {
-            let mut sig = cr_ir::Signature::new(cranelift_codegen::isa::CallConv::SystemV);
+            let cc = if cfg!(target_os="windows") {
+                cranelift_codegen::isa::CallConv::WindowsFastcall
+            }
+            else {
+                cranelift_codegen::isa::CallConv::SystemV
+            };
+            let mut sig = cr_ir::Signature::new(cc);
             let ret_ti = state.type_info(&fcn_sig.ret);
             indirect_return = !ret_ti.is_primitive_like() && ret_ti.size() > 0;
             if indirect_return {
@@ -447,24 +453,7 @@ fn visit_block(out_state: &mut State, return_ptr: Option<cr_ir::Value>, block_id
             let res = match dst {
                 Ty::Discard => todo!(),
                 //Ty::Float(_) => todo!(),
-                Ty::Unsigned(ds) => match src
-                    {
-                    Ty::Discard => todo!(),
-                    Ty::Signed(_) => todo!(),
-                    Ty::Unsigned(ss) => {
-                        if ds == ss {
-                            x
-                        }
-                        else if ds < ss {
-                            out_state.builder.ins().ireduce(dst_cr, x)
-                        }
-                        else {
-                            out_state.builder.ins().uextend(dst_cr, x)
-                        }
-                    },
-                    //Ty::Float(_) => todo!(),
-                    },
-                Ty::Signed(ds) => match src
+                Ty::Unsigned(ds) | Ty::Signed(ds) => match src
                     {
                     Ty::Discard => todo!(),
                     Ty::Signed(ss) => {
@@ -477,8 +466,18 @@ fn visit_block(out_state: &mut State, return_ptr: Option<cr_ir::Value>, block_id
                         else {
                             out_state.builder.ins().sextend(dst_cr, x)
                         }
+                    }
+                    Ty::Unsigned(ss) => {
+                        if ds == ss {
+                            x
+                        }
+                        else if ds < ss {
+                            out_state.builder.ins().ireduce(dst_cr, x)
+                        }
+                        else {
+                            out_state.builder.ins().uextend(dst_cr, x)
+                        }
                     },
-                    Ty::Unsigned(_) => todo!(),
                     //Ty::Float(_) => todo!(),
                     },
                 };
