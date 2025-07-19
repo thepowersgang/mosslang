@@ -27,7 +27,7 @@ struct sFILE {
 }
 
 type FILE = *mut sFILE;
-const NULL: *mut void = 0;
+const NULL: *mut void = 0p;
 extern {
     static stderr: FILE;
 	fn fopen(path: *const [c_char; ...], mode: *const [c_char; ...]) -> FILE;
@@ -95,7 +95,7 @@ extern "C" fn main(argc: usize, argv: *const [*const [c_char; ...]; ...]) -> i32
 	}
     
 	// Read image
-    let (w, h, pixel_count, buffer);
+    let (w, h, pixel_count, buffer): (_, _, _, *mut [u32; ...]);
 	{
 		let img = IMG_Load(input_file);
 		if img != 0p {
@@ -105,7 +105,7 @@ extern "C" fn main(argc: usize, argv: *const [*const [c_char; ...]; ...]) -> i32
 		w = img.*.w;
 		h = img.*.h;
 		pixel_count = (w * h) as usize;
-		buffer = malloc( pixel_count * 4 ) as *mut u32;
+		buffer = malloc( pixel_count * 4 ) as *mut [u32; ...];
 		
         let mut i = 0;
 		for y in 0 .. h
@@ -123,9 +123,9 @@ extern "C" fn main(argc: usize, argv: *const [*const [c_char; ...]; ...]) -> i32
 	if comp == Compression::Auto
 	{
 		// Try encoding using a single RLE stream
-		let rle32length = CompressRLE1x32(0, buffer as *const _, pixel_count);
+		let rle32length = CompressRLE1x32(0p, buffer as *const _, pixel_count);
 		// Try encoding using separate RLE streams for each channel
-		let rle4x8length = CompressRLE4x8(0, buffer as *const _, pixel_count);
+		let rle4x8length = CompressRLE4x8(0p, buffer as *const _, pixel_count);
 		
 	//	printf("raw length = %i\n", pixel_count * 4);
 	//	printf("rle32length = %u\n", (unsigned int)rle32length);
@@ -159,7 +159,7 @@ extern "C" fn main(argc: usize, argv: *const [*const [c_char; ...]; ...]) -> i32
             (bufLen, buffer2)
             }
         _ => {
-            fprintf(stderr, "Unknown compresion %i\n", comp);
+            fprintf(stderr, "Unknown compression %i\n", comp);
             return 2
             }
         };
@@ -193,10 +193,10 @@ fn CompressRLE1x32(Dest: *mut void, Src: *const void, Size: usize) -> usize
 fn CompressRLE4x8(Dest: *mut void, Src: *const void, Size: usize) -> usize
 {
 	let ret = 0;
-	ret += RLE1_7(if Dest != 0p { Dest as *mut u8 + ret } else { 0p }, Src as *const u8 + 0, Size, 1, 4, 3);
-	ret += RLE1_7(if Dest != 0p { Dest as *mut u8 + ret } else { 0p }, Src as *const u8 + 1, Size, 1, 4, 3);
-	ret += RLE1_7(if Dest != 0p { Dest as *mut u8 + ret } else { 0p }, Src as *const u8 + 2, Size, 1, 4, 3);
-	ret += RLE1_7(if Dest != 0p { Dest as *mut u8 + ret } else { 0p }, Src as *const u8 + 3, Size, 1, 4, 3);
+	ret += RLE1_7(if Dest != 0p { Dest as *mut [u8; ...] + ret } else { 0p }, Src as *const [u8; ...] + 0, Size, 1, 4, 3);
+	ret += RLE1_7(if Dest != 0p { Dest as *mut [u8; ...] + ret } else { 0p }, Src as *const [u8; ...] + 1, Size, 1, 4, 3);
+	ret += RLE1_7(if Dest != 0p { Dest as *mut [u8; ...] + ret } else { 0p }, Src as *const [u8; ...] + 2, Size, 1, 4, 3);
+	ret += RLE1_7(if Dest != 0p { Dest as *mut [u8; ...] + ret } else { 0p }, Src as *const [u8; ...] + 3, Size, 1, 4, 3);
 	return ret;
 }
 
@@ -220,7 +220,7 @@ const USE_VERBATIM: bool = true;
  * other data that you may not want to RLE together (for example, different
  * colour channels in an image).
  */
-fn RLE1_7(dest: *mut u8, src: *const u8, Size: usize, BlockSize: usize, BlockStep: usize, MinRunLength: usize) -> usize
+fn RLE1_7(dest: *mut [u8; ...], src: *const [u8; ...], Size: usize, BlockSize: usize, BlockStep: usize, MinRunLength: usize) -> usize
 {
 	let mut ret = 0;
 	let mut nVerb = 0;
