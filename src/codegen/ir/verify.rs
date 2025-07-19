@@ -3,32 +3,62 @@ use crate::INDENT;
 
 pub fn check(ir: &super::Expr, arg_count: usize)
 {
-    write_before_use(ir, arg_count);
+    let mut failures = FailureList::new();
+    write_before_use(&mut failures, ir, arg_count);
+    failures.check(ir);
 }
 pub fn check_ssa(ir: &super::Expr, arg_count: usize)
 {
-    write_once(ir);
-    write_before_use(ir, arg_count);
+    let mut failures = FailureList::new();
+    write_once(&mut failures, ir);
+    write_before_use(&mut failures, ir, arg_count);
+    failures.check(ir);
 }
 
-fn write_once(ir: &super::Expr) {
-    struct V {
+struct FailureList {
+    items: Vec<(super::visit::Addr, String)>,
+}
+impl FailureList {
+    fn new() -> Self {
+        FailureList { items: Default::default() }
+    }
+    fn push(&mut self, addr: super::visit::Addr, msg: String) {
+        self.items.push((addr, msg));
+    }
+    fn check(mut self, ir: &super::Expr) {
+        if !self.items.is_empty() {
+            eprintln!("Validation failures:");
+            self.items.sort();
+            self.items.dedup();
+            for (addr,msg) in &self.items {
+                eprintln!("@{}: {}", addr, msg)
+            }
+            let _ = super::dump::dump(&mut ::std::io::stdout().lock(), ir);
+            panic!("Validation failures found");
+        }
+    }
+}
+
+fn write_once(failures: &mut FailureList, ir: &super::Expr) {
+    struct V<'a> {
+        failures: &'a mut FailureList,
         written: BitSet,
     }
-    impl super::visit::Visitor for V {
+    impl super::visit::Visitor for V<'_> {
         fn writes_slot(&mut self, addr: super::visit::Addr, local_index: &super::LocalIndex) {
             if self.written.set(local_index.0) {
-                panic!("Multi-write of {:?} at {}", local_index, addr)
+                self.failures.push(addr, format!("Multi-write of {:?}", local_index));
             }
         }
     }
     let mut v = V {
+        failures,
         written: BitSet::new(ir.locals.len()),
     };
     super::visit::visit_expr(&mut v, ir);
 }
 
-fn write_before_use(ir: &super::Expr, arg_count: usize) {
+fn write_before_use(failures: &mut FailureList, ir: &super::Expr, arg_count: usize) {
     let mut block_states: Vec<_> = ir.blocks.iter().map(|_| None).collect();
     let mut stack = Vec::with_capacity(32);
     block_states[0] = Some({
@@ -64,13 +94,14 @@ fn write_before_use(ir: &super::Expr, arg_count: usize) {
         }
     }
     while let Some(idx) = stack.pop() {
-        struct V {
+        struct V<'a> {
+            failures: &'a mut FailureList,
             states: BitSet,
         }
-        impl super::visit::Visitor for V {
+        impl super::visit::Visitor for V<'_> {
             fn reads_slot(&mut self, addr: super::visit::Addr, local_index: &super::LocalIndex) {
                 if !self.states.is_set(local_index.0) {
-                    panic!("Use of unset local {:?} at {}", local_index, addr)
+                    self.failures.push(addr, format!("Use of unset local {:?}", local_index));
                 }
             }
             fn writes_slot(&mut self, _addr: super::visit::Addr, local_index: &super::LocalIndex) {
@@ -79,6 +110,7 @@ fn write_before_use(ir: &super::Expr, arg_count: usize) {
             }
         }
         let mut v = V {
+            failures,
             states: block_states[idx].clone().unwrap(),
         };
         println!("{INDENT}bb{}", idx);
