@@ -43,6 +43,7 @@ pub enum ExprKind
     Block(Block),
     LiteralString(crate::ast::StringLiteral),
     LiteralInteger(u128, IntLitClass),
+    LiteralBoolean(bool),
     TypeInfoSizeOf(super::Type),
 
     Return(Option<Box<Expr>>),
@@ -110,6 +111,8 @@ impl<'a> ::core::fmt::Debug for ExprKind {
             write!(f, "LiteralString({:?})", s),
         ExprKind::LiteralInteger(v, int_lit_class) =>
             write!(f, "LiteralInteger({}, {:?})", v, int_lit_class),
+        ExprKind::LiteralBoolean(v) =>
+            write!(f, "LiteralBoolean({:?})", v),
         ExprKind::TypeInfoSizeOf(ty) =>
             write!(f, "TypeInfoSizeOf({:?})", ty),
         ExprKind::Return(expr) =>

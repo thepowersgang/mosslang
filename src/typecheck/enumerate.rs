@@ -308,6 +308,7 @@ impl<'a, 'b> crate::ast::ExprVisitor for RuleEnumerate<'a, 'b> {
             IntLitClass::Integer(int_class) => self.equate_types(&expr.span, &expr.data_ty, &Type::new_integer(expr.span.clone(), *int_class)),
             }
         }
+        ExprKind::LiteralBoolean(_) => self.equate_types(&expr.span, &expr.data_ty, &Type::new_bool(expr.span.clone())),
         ExprKind::TypeInfoSizeOf(ty) => {
             self.visit_ty(ty);
             self.equate_types(&expr.span, &expr.data_ty, &Type::new_integer(expr.span.clone(), crate::ast::ty::IntClass::PtrInt))

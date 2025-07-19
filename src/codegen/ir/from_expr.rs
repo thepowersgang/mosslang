@@ -71,13 +71,15 @@ impl<'a,'b> Visitor<'a,'b> {
                 crate::ast::expr::IntLitClass::Unspecified => match expr.data_ty.kind
                     {
                     crate::ast::ty::TypeKind::Integer(cls) => cls,
-                    _ => todo!("Unspecified integer type? {}", expr.data_ty),
+                    //crate::ast::ty::TypeKind::Pointer(..) => 
+                    _ => todo!("{}Unspecified integer type? {}", expr.span, expr.data_ty),
                     },
                 crate::ast::expr::IntLitClass::Pointer => crate::ast::ty::IntClass::PtrInt,
                 crate::ast::expr::IntLitClass::Integer(int_class) => *int_class,
                 };
             super::Value::IntegerLiteral(*v, cls)
             },
+        ExprKind::LiteralBoolean(v) => super::Value::IntegerLiteral(*v as u128, crate::ast::ty::IntClass::Unsigned(0)),
         ExprKind::TypeInfoSizeOf(ty) => {
             super::Value::IntegerLiteral( self.parent.type_info(ty).size() as u128, crate::ast::ty::IntClass::PtrInt )
         },

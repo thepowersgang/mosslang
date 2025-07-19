@@ -77,7 +77,8 @@ pub fn visit_mut_expr(c: &mut dyn ExprVisitor, expr: &mut crate::ast::expr::Expr
     match &mut expr.kind {
     ExprKind::Block(block) => c.visit_mut_block(block),
     ExprKind::LiteralString(_)
-    |ExprKind::LiteralInteger(_, _) => {},
+    |ExprKind::LiteralInteger(_, _)
+    |ExprKind::LiteralBoolean(_) => {},
     ExprKind::TypeInfoSizeOf(_) => {},
 
     ExprKind::Continue => {},

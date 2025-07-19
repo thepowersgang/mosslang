@@ -372,7 +372,7 @@ fn parse_expr_value(lex: &mut super::Lexer) -> super::Result<e::Expr> {
             Some(super::lex::IntClass::U32) => e::IntLitClass::Integer(IntClass::Unsigned(2)),
             Some(super::lex::IntClass::U64) => e::IntLitClass::Integer(IntClass::Unsigned(4)),
         }),
-        super::lex::Literal::Bool(v) => e::ExprKind::LiteralInteger(v as u128, e::IntLitClass::Integer(IntClass::Unsigned(0))),
+        super::lex::Literal::Bool(v) => e::ExprKind::LiteralBoolean(v),
         super::lex::Literal::Float(v, cls) => todo!("Float literal: {:?} {:?}", v, cls),
         }.to_expr(lex.end_span(&ps))
         },
