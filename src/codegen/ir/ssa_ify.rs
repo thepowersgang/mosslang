@@ -115,8 +115,11 @@ pub fn from_expr(mut ir: super::Expr) -> super::Expr
             // - Stop enumerating when another write or read position is seen
             // Find common blocks between the writes
             // - Tag that common block as being a merge point
+            let mut splits = Vec::new();
             for w in rs.writes.iter() {
                 let path_count = other_write_routes.len();
+                let w_idx = splits.len();
+                splits.push(path_count);
 
                 // Enumerate all routes a write could take
                 super::visit::enumerate_paths_from(&ir, *w, |a| {
@@ -136,46 +139,64 @@ pub fn from_expr(mut ir: super::Expr) -> super::Expr
                         }
                     }
 
-                    println!("{INDENT}#{slot} @{w} route = {:?} {}", route, if is_read { "read" } else if maybe_read { "maybe" } else { "unread" });
+                    println!("{INDENT}#{slot} [W{w_idx}] @{w} route = {:?} {}", route, if is_read { "read" } else if maybe_read { "maybe" } else { "unread" });
                     // Don't consider if this path doesn't read the value
                     if !(is_read || maybe_read) {
                     }
                     else {
-                        // Check if there's a shared block with one already in the list
-                        // NOTE: We only care about blocks entered, hence the `.skip(1)`
-                        for path in other_write_routes[..path_count].iter() {
-                            for bb_idx in route.blocks().skip(1) {
-                                if path.blocks().skip(1).any(|v| v == bb_idx) {
-                                    // Found a common point
-                                    if !common_blocks.set(bb_idx) {
-                                        println!("{INDENT}#{slot} Arms join at BB{bb_idx}")
-                                    }
-                                    break;
-                                }
-                            }
-                        }
-
                         // Add to list
                         other_write_routes.push(route);
                     }
                 });
+                println!("--")
+            }
+            // Push the end of the list, so the below `windows` yields the right number of entries
+            splits.push(other_write_routes.len());
+
+            for (w_idx,w) in splits.windows(2).enumerate() {
+                let [s,e] = *w else { unreachable!() };
+                for route_1 in &other_write_routes[s..e] {
+                    for (i,route_2) in other_write_routes.iter().enumerate() {
+                        if s <= i && i < e {
+                            // Ignore, current write
+                        }
+                        else {
+                            // Check if there's a shared block with one already in the list
+                            // NOTE: We only care about blocks entered, hence the `.skip(1)`
+                            for bb_idx in route_1.blocks().skip(1) {
+                                if route_2.blocks().skip(1).any(|v| v == bb_idx) {
+                                    // Found a common point
+                                    if !common_blocks.set(bb_idx) {
+                                        println!("{INDENT}#{slot} [W{w_idx}] Arms join at BB{bb_idx}")
+                                    }
+                                    break;
+                                }
+                            }
+
+                        }
+                    }
+                }
             }
 
             // Allocate a new local for every write, and one for all but one of the union/common blocks
             let mut remap_slot = Some(super::LocalIndex(slot));
             for block_idx in 0 .. ir.blocks.len() {
                 if common_blocks.is_set(block_idx) {
-                    // Add an argument (TODO: Different index if there's multiple common blocks)
+                    // Determine the local index to use for this block
+                    // - First common block get the original, the rest get a new local
                     let v = remap_slot.take().unwrap_or_else(|| {
                         let ty = ir.locals[slot].clone();
                         let rv = super::LocalIndex(ir.locals.len());
                         ir.locals.push(ty);
                         rv
                     });
+                    // Add as an argument (input) to the block
                     ir.blocks[block_idx].args.push(v);
+                    // Add to the remap table
                     remap_table.insert(RemapKey { addr: super::visit::Addr { block_idx: super::BlockIndex(block_idx), stmt_idx: 0}, after_read: false }, v);
                 }
             }
+            // - Add new locals for _all_ writes
             for &w in &rs.writes {
                 let ty = ir.locals[slot].clone();
                 remap_table.insert(RemapKey { addr: w, after_read: true }, super::LocalIndex(ir.locals.len()));
@@ -263,17 +284,53 @@ pub fn from_expr(mut ir: super::Expr) -> super::Expr
     
     for (block_idx,block) in ir.blocks.iter_mut().enumerate() {
         struct V<'a> {
+            locals: &'a mut Vec<crate::ast::Type>,
             alloca_needed: &'a BitSet,
+            changed: bool,
+            new_items: Vec<(usize, Operation)>,
+        }
+        impl V<'_> {
+            fn new_pre(&mut self, addr: super::visit::Addr, operation: Operation) {
+                self.new_items.push((addr.stmt_idx, operation));
+            }
+            fn new_post(&mut self, addr: super::visit::Addr, operation: Operation) {
+                assert!(addr.stmt_idx != !0, "TODO: Push statement after terminator - needs to go to all targets?");
+                self.new_items.push((addr.stmt_idx + 1, operation));
+            }
+            fn set_changed(&mut self) {
+                self.changed = true;
+            }
+            fn take_changed(&mut self) -> bool {
+                ::std::mem::replace(&mut self.changed, false)
+            }
         }
         impl VisitorMut for V<'_> {
-            fn writes_slot(&mut self, _: super::visit::Addr, local_index: &mut super::LocalIndex) {
+            fn writes_slot(&mut self, addr: super::visit::Addr, local_index: &mut super::LocalIndex) {
                 if self.alloca_needed.is_set(local_index.0) {
-                    todo!("update_write: Add a `_I = _new` after this statement");
+                    // Allocate a new local
+                    let new_local = crate::codegen::ir::LocalIndex(self.locals.len());
+                    let ty = self.locals[local_index.0].clone();
+                    self.locals.push(ty);
+                    // Create the assignment deref
+                    self.new_post(addr, Operation::AssignDeref(*local_index, crate::codegen::ir::Value::Local(new_local, Default::default())));
+                    // Update this local
+                    *local_index = new_local;
+
+                    self.set_changed();
                 }   
             }
-            fn reads_slot(&mut self, _: super::visit::Addr, local_index: &mut super::LocalIndex) {
+            fn reads_slot(&mut self, addr: super::visit::Addr, local_index: &mut super::LocalIndex) {
                 if self.alloca_needed.is_set(local_index.0) {
-                    todo!("update_use: Add a `_new = _I` before this statement");
+                    // Allocate a new local
+                    let new_local = crate::codegen::ir::LocalIndex(self.locals.len());
+                    let ty = self.locals[local_index.0].clone();
+                    self.locals.push(ty);
+                    // Create the assignment - before this current statement
+                    self.new_pre(addr, Operation::AssignLocal(new_local, crate::codegen::ir::Value::Deref { ptr: *local_index, wrappers: Default::default() }));
+                    // Update this local
+                    *local_index = new_local;
+                    
+                    self.set_changed();
                 }
             }
 
@@ -284,15 +341,18 @@ pub fn from_expr(mut ir: super::Expr) -> super::Expr
                     self.reads_wrappers(addr, wrapper_list);
                     if self.alloca_needed.is_set(local_index.0) {
                         *value = Value::Deref { ptr: *local_index, wrappers: ::std::mem::take(wrapper_list) };
+                        
+                        self.set_changed();
                     }
                 },
                 _ => super::visit::visit_value_mut(self, addr, value),
                 }
             }
         }
+        let mut v = V { locals: &mut ir.locals, alloca_needed: &alloca_needed, changed: false, new_items: Default::default() };
         for (stmt_idx,stmt) in block.statements.iter_mut().enumerate() {
             let addr = super::visit::Addr { block_idx: super::BlockIndex(block_idx), stmt_idx };
-            let mut v = V { alloca_needed: &alloca_needed };
+            println!("{INDENT}REMAP {addr}: {stmt:?}",);
             match stmt {
             Operation::AssignLocal(local_index, value) => {
                 v.reads_value(addr, value);
@@ -311,11 +371,26 @@ pub fn from_expr(mut ir: super::Expr) -> super::Expr
                 super::visit::visit_operation_mut(&mut v, addr, stmt);
             },
             }
+            if v.take_changed() {
+                println!("{INDENT}REMAP {addr}: -> {stmt:?}",);
+            }
         }
         {
-            let mut v = V { alloca_needed: &alloca_needed };
             let addr = super::visit::Addr { block_idx: super::BlockIndex(block_idx), stmt_idx: !0 };
+            println!("{INDENT}REMAP {addr}: {:?}", block.terminator);
             super::visit::visit_terminator_mut(&mut v, addr, &mut block.terminator);
+            if v.take_changed() {
+                println!("{INDENT}REMAP {addr}: -> {:?}", block.terminator);
+            }
+        }
+        // Sort the new statements by insertion location
+        v.new_items.sort_by_key(|v| v.0);
+        // Then insert in reverse order - not efficient, but required for correctness
+        // - It would be more efficient to expand the list, then move items into position... but that's too complex for now
+        for (stmt_idx, op) in v.new_items.into_iter().rev() {
+            let addr = super::visit::Addr { block_idx: super::BlockIndex(block_idx), stmt_idx };
+            println!("{INDENT}REMAP {addr} += {op:?}",);
+            block.statements.insert(stmt_idx, op);
         }
     }
     new_ops.append(&mut ir.blocks[0].statements);
