@@ -92,7 +92,7 @@ pub fn from_expr(mut ir: super::Expr) -> super::Expr
             // - At each of these, a new local needs to be made
             let mut common_blocks = BitSet::new(ir.blocks.len());
             // Routes from writes already processed
-            let mut other_write_routes: Vec<super::visit::Route> = Vec::new();
+            let mut write_routes: Vec<super::visit::Route> = Vec::new();
 
             #[derive(PartialEq, Eq, PartialOrd, Ord)]
             struct RemapKey {
@@ -117,7 +117,7 @@ pub fn from_expr(mut ir: super::Expr) -> super::Expr
             // - Tag that common block as being a merge point
             let mut splits = Vec::new();
             for w in rs.writes.iter() {
-                let path_count = other_write_routes.len();
+                let path_count = write_routes.len();
                 let w_idx = splits.len();
                 splits.push(path_count);
 
@@ -145,34 +145,76 @@ pub fn from_expr(mut ir: super::Expr) -> super::Expr
                     }
                     else {
                         // Add to list
-                        other_write_routes.push(route);
+                        // TODO: Trim the path/route to the last read (if it doesn't loop to before a read)
+                        write_routes.push(route);
                     }
                 });
                 println!("--")
             }
+            println!("{INDENT}#{slot} {} writes, total of {} routes", splits.len(), write_routes.len());
             // Push the end of the list, so the below `windows` yields the right number of entries
-            splits.push(other_write_routes.len());
+            splits.push(write_routes.len());
+
+            // Convert `write_routes` into a trie for each write, to allow efficient iteration of every path
+            let tries = {
+                let mut tries = Vec::with_capacity(splits.len() - 1);
+                for (w_idx,w) in splits.windows(2).enumerate() {
+                    let [s,e] = *w else { unreachable!() };
+                    let this_routes = write_routes[s..e].iter();
+
+                    // Sort the routes
+                    let mut routes: Vec<_> = this_routes.map(|r| r.blocks().skip(1).collect::<Vec<_>>()).collect();
+                    routes.sort();
+                    let trie = crate::helpers::iterable_trie::IterableTrie::build_from_list(&routes);
+                    println!("{INDENT}W{}: {} entry trie", w_idx, trie.total_size());
+                    tries.push(trie);
+                }
+                tries
+            };
 
             for (w_idx,w) in splits.windows(2).enumerate() {
+                // NOTE: We only care about blocks entered, hence the `.skip(1)` on every block iteration
                 let [s,e] = *w else { unreachable!() };
-                for route_1 in &other_write_routes[s..e] {
-                    for (i,route_2) in other_write_routes.iter().enumerate() {
-                        if s <= i && i < e {
-                            // Ignore, current write
-                        }
-                        else {
-                            // Check if there's a shared block with one already in the list
-                            // NOTE: We only care about blocks entered, hence the `.skip(1)`
-                            for bb_idx in route_1.blocks().skip(1) {
-                                if route_2.blocks().skip(1).any(|v| v == bb_idx) {
-                                    // Found a common point
-                                    if !common_blocks.set(bb_idx) {
-                                        println!("{INDENT}#{slot} [W{w_idx}] Arms join at BB{bb_idx}")
-                                    }
-                                    break;
-                                }
-                            }
+                let this_routes = write_routes[s..e].iter();
+                //let other_routes = Iterator::chain(write_routes[..s].iter(), write_routes[e..].iter());
+            
+                use crate::helpers::iterable_trie::VisitRes;
 
+                // Generate a bitset of all blocks present in other paths, avoids having to iterate the trie for blocks that are unique to this path
+                let mut any_other = BitSet::new(ir.blocks.len());
+                for (i, t) in tries.iter().enumerate() {
+                    if i != w_idx {
+                        t.visit(|_vi, &bb_idx| {
+                            any_other.set(bb_idx);
+                            //println!("{INDENT} {:w$} {}", "", bb_idx, w=vi.depth as usize);
+                            VisitRes::Continue
+                        });
+                    }
+                }
+
+                // TODO: This might be more efficient reversed, visiting the tries and seeing if there's a common block in an arm?
+                
+                for (route_idx,route_1) in this_routes.clone().enumerate() {
+                    println!("{INDENT}W{} r{}", w_idx, route_idx);
+                    // Check if there's a shared block with one already in the list
+                    for bb_idx in route_1.blocks().skip(1) {
+                        if common_blocks.is_set(bb_idx) {
+                            continue;
+                        }
+                        if !any_other.is_set(bb_idx) {
+                            // None of the other arms involve this block, so don't bother
+                            continue
+                        }
+                        // Search for a path in other write-arms that involve this block
+                        for (_, t) in tries.iter().enumerate().filter(|&(i,_)| i != w_idx) {
+                            t.visit(|_, &other_bb_idx| {
+                                if other_bb_idx == bb_idx {
+                                    if common_blocks.set(bb_idx) {
+                                        return VisitRes::StopAll;
+                                    }
+                                }
+                                VisitRes::Continue
+                            });
                         }
                     }
                 }

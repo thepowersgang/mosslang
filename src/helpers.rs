@@ -1,3 +1,6 @@
+
+pub mod iterable_trie;
+
 /// Quick bitset implementation
 #[derive(Clone)]
 pub struct BitSet {
