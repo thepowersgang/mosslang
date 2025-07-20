@@ -228,34 +228,61 @@ where
 
     // Define block parameters
     let mut return_ptr = None;
-    for (i,block) in ir.blocks.iter().enumerate() {
-        if i == 0 {
+    struct BlockParamSet {
+        //bb_idx: usize,
+        //local: ms_ir::LocalIndex,
+        ss: cr_ir::StackSlot,
+        ofs: usize,
+        //cr_ty: cr_ir::Type,
+        value: cr_ir::Value,
+    }
+    let mut block_param_entries: Vec<_> = (0..ir.blocks.len()).map(|v| Vec::new()).collect();
+    for (bb_idx,block) in ir.blocks.iter().enumerate() {
+        if bb_idx == 0 {
             out_state.builder.append_block_params_for_function_params(out_state.blocks[0]);
-            let mut it = out_state.builder.block_params(out_state.blocks[i]).iter();
+            let mut it = out_state.builder.block_params(out_state.blocks[bb_idx]).iter();
             if indirect_return {
                 return_ptr = it.next().copied();
             }
             for (i,v) in it.enumerate() {
-                if let VariableValue::Unassigned = out_state.variables[i] {
-                    out_state.variables[i] = VariableValue::Value(*v);
+                match out_state.variables[i] {
+                ref mut s @ VariableValue::Unassigned => {
+                    *s = VariableValue::Value(*v);
+                }
+                VariableValue::Value(_) => panic!(),
+                VariableValue::StackSlot(_) => todo!(),
+                VariableValue::Empty => {},
                 }
             }
         }
         else {
-            for p in block.args.iter() {
-                if let VariableValue::Unassigned = out_state.variables[p.0] {
+            for (i,p) in block.args.iter().enumerate() {
+                match out_state.variables[p.0] {
+                ref mut s @ VariableValue::Unassigned => {
                     match get_types(&ir.locals[p.0]) {
                     TranslatedType::Empty => todo!(),
                     TranslatedType::Single(cr_ty) => {
-                        out_state.builder.append_block_param(out_state.blocks[i], cr_ty);
+                        let v = out_state.builder.append_block_param(out_state.blocks[bb_idx], cr_ty);
+                        *s = VariableValue::Value(v);
                     },
                     TranslatedType::Complex => todo!(),
                     }
-                }
-            }
-            for (p,v) in Iterator::zip( block.args.iter(), out_state.builder.block_params(out_state.blocks[i]) ) {
-                if let VariableValue::Unassigned = out_state.variables[p.0] {
-                    out_state.variables[p.0] = VariableValue::Value(*v);
+                    }
+                VariableValue::Value(_) => panic!("Block parameter BB{bb_idx} #{i} already assigned (local _{})", p.0),
+                VariableValue::StackSlot(ss) => {
+                    block_param_entries[bb_idx].extend(
+                        iter_values_mem(0, &outer_state.type_info(&ir.locals[p.0]))
+                            .map(|(ofs, cr_ty)| BlockParamSet {
+                                //bb_idx,
+                                //local: *p,
+                                ss,
+                                ofs,
+                                //cr_ty,
+                                value: out_state.builder.append_block_param(out_state.blocks[bb_idx], cr_ty)
+                            })
+                        );
+                },
+                VariableValue::Empty => {}, // Empty values are handled elsewhere
                 }
             }
         }
@@ -300,6 +327,11 @@ where
     // Start lowering blocks
     // - NOTE: Visit the blocks in approximate execution order, so variables are populated before use
     for block_idx in block_visit_order {
+        out_state.builder.switch_to_block(out_state.blocks[block_idx]);
+        // Inject the required operations for destructured block params
+        for v in block_param_entries[block_idx].iter() {
+            out_state.builder.ins().stack_store(v.value, v.ss, v.ofs as i32);
+        }
         visit_block(&mut out_state, return_ptr, block_idx);
     }
 
@@ -312,7 +344,6 @@ fn visit_block(out_state: &mut State, return_ptr: Option<cr_ir::Value>, block_id
     let ir = out_state.ir;
     
     let block = &ir.blocks[block_idx];
-    out_state.builder.switch_to_block(out_state.blocks[block_idx]);
     println!("{INDENT}bb{}", block_idx);
     for (stmt_idx, stmt) in block.statements.iter().enumerate() {
         println!("{INDENT}BB{block_idx}/{stmt_idx}: {:?}", stmt);
@@ -338,7 +369,8 @@ fn visit_block(out_state: &mut State, return_ptr: Option<cr_ir::Value>, block_id
                     out_state.copy_to_stack(dst_ss, 0, &ty, &src, src_ofs);
                 }
                 else {
-                    todo!("Assign from a stack slot to non-slot")
+                    let v = ReadValue::Memory(src, ty, src_ofs).into_iter(out_state).next().unwrap();
+                    out_state.store_value(local_index, v)
                 }
             },
             }
@@ -362,7 +394,8 @@ fn visit_block(out_state: &mut State, return_ptr: Option<cr_ir::Value>, block_id
                 crate::ast::ty::Type::new_path_resolved(crate::Span::new_null(), crate::ast::path::TypeBinding::Struct(path.clone()))
             }
             else {
-                todo!("CreateComposite - tuple")
+                ir.locals[local_index.0].clone()
+                //todo!("CreateComposite - tuple")
             };
             let ti = out_state.outer_state.type_info(&ty);
             if ti.is_primitive_like() {
@@ -615,7 +648,31 @@ fn visit_block(out_state: &mut State, return_ptr: Option<cr_ir::Value>, block_id
         let (else_label, else_args) = out_state.get_jump(if_false);
         out_state.builder.ins().brif( cnd, then_label, &then_args, else_label, &else_args);
     },
-    Terminator::MatchEnum { value, index, if_true, if_false  } => todo!("terminator: Match"),
+    Terminator::MatchEnum { value, index, if_true, if_false  } => {
+        let ty = match out_state.value_type(value)
+            {
+            None => todo!("Type required for `MatchEnum`"),
+            Some(ty) => ty,
+            };
+        match ty.kind
+        {
+        TypeKind::Named(crate::ast::ty::TypePath::Resolved(crate::ast::path::TypeBinding::ValueEnum(_))) => {
+            let cr_ty = match get_types(ty)
+                {
+                TranslatedType::Single(t) => t,
+                TranslatedType::Empty => todo!(),
+                TranslatedType::Complex => todo!(),
+                };
+            let value = out_state.read_value_single(value);
+            let idx= out_state.builder.ins().iconst(cr_ty, *index as i64);
+            let cnd = out_state.builder.ins().icmp(cr_ir::condcodes::IntCC::Equal, value, idx);
+            let (then_label, then_args) = out_state.get_jump(if_true);
+            let (else_label, else_args) = out_state.get_jump(if_false);
+            out_state.builder.ins().brif( cnd, then_label, &then_args, else_label, &else_args);
+            },
+        _ => todo!("terminator: Match - {}", ty),
+        }
+    },
     Terminator::CallPath { dst, tgt, path, args } => {
         let (fr,is_indirect) = out_state.get_function(path, args.len(), &|i| &args[i]);
         let args = out_state.get_val_list(&args);
@@ -664,18 +721,69 @@ enum ReadValue {
     //Multiple,
 }
 impl ReadValue {
-    fn into_iter(self, state: &mut State) -> impl Iterator<Item=cr_ir::Value> {
+    fn into_iter(self, state: &mut State) -> ReadValueIter {
         match self {
-        ReadValue::Empty => None,
+        ReadValue::Empty => ReadValueIter::Empty,
         ReadValue::Memory(src, ty, ofs) => {
             match get_types(&ty) {
-            TranslatedType::Empty => None,
-            TranslatedType::Single(ty) => Some(src.load(&mut state.builder, ty, ofs)),
-            TranslatedType::Complex => todo!("into_iter for stack slot - non-trivial: {}", ty),
+            TranslatedType::Empty => ReadValueIter::Empty,
+            TranslatedType::Single(ty) => ReadValueIter::Single(src.load(&mut state.builder, ty, ofs)),
+            TranslatedType::Complex => {
+                let ti = state.outer_state.type_info(&ty);
+                ReadValueIter::Complex(
+                    iter_values_mem(ofs, &ti)
+                        .map(|(ofs,ty)| src.load(&mut state.builder, ty, ofs))
+                        .collect::<Vec<_>>()
+                        .into_iter()
+                    )
+            },
             }
         },
-        ReadValue::Single(value) => Some(value),
-        }.into_iter()
+        ReadValue::Single(value) => ReadValueIter::Single(value),
+        }
+    }
+}
+enum ReadValueIter {
+    Empty,
+    Single(cr_ir::Value),
+    Complex(::std::vec::IntoIter<cr_ir::Value>)
+}
+impl Iterator for ReadValueIter {
+    type Item = cr_ir::Value;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+        ReadValueIter::Empty => None,
+        ReadValueIter::Single(_) => {
+            let ReadValueIter::Single(rv) = ::std::mem::replace(self, ReadValueIter::Empty) else { unreachable!() };
+            Some(rv)
+        },
+        ReadValueIter::Complex(it) => it.next(),
+        }
+    }
+}
+fn iter_values_mem<'i>(ofs: usize, ti: &'i super::type_info::TypeInfo) -> Box<dyn Iterator<Item=(usize, cr_ir::Type)> + 'i>
+{
+    if ti.size() == 0 {
+        Box::new(::std::iter::empty())
+    }
+    else if ti.is_primitive_like() {
+        let ty = match ti.size() {
+            0 => unreachable!(),
+            1 => cr_ir::types::I8,
+            2 => cr_ir::types::I16,
+            4 => cr_ir::types::I32,
+            8 => cr_ir::types::I64,
+            i => todo!("Primitive type - {} bytes", i),
+            };
+        Box::new(::std::iter::once((ofs, ty)))
+    }
+    else if let Some(fields) = ti.as_composite() {
+        Box::new( fields.iter()
+                .flat_map(move |f| iter_values_mem(ofs + f.ofs, &f.type_info)) )
+    }
+    else {
+        todo!()
     }
 }
 enum ReadValueMemorySrc {
