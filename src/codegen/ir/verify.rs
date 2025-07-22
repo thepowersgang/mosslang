@@ -81,7 +81,7 @@ fn write_before_use(failures: &mut FailureList, ir: &super::Expr, arg_count: usi
                     // If the value isn't set in the incoming, then clear it in `s` and try again
                     if !states.is_set(i) {
                         if s.clear(i) {
-                            println!("{INDENT}bb{} _{} unset", idx, i);
+                            //println!("{INDENT}verify::#write_before_use::maybe_push: bb{} _{} unset", idx, i);
                             change = true;
                         }
                     }
@@ -113,7 +113,7 @@ fn write_before_use(failures: &mut FailureList, ir: &super::Expr, arg_count: usi
             failures,
             states: block_states[idx].clone().unwrap(),
         };
-        println!("{INDENT}bb{}", idx);
+        println!("{INDENT}verify::#write_before_use: bb{}", idx);
         let b = &ir.blocks[idx];
         for a in b.args.iter() {
             v.states.set(a.0);
