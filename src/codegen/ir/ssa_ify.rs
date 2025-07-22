@@ -195,26 +195,38 @@ pub fn from_expr(mut ir: super::Expr) -> super::Expr
                 // TODO: This might be more efficient reversed, visiting the tries and seeing if there's a common block in an arm?
                 
                 for (route_idx,route_1) in this_routes.clone().enumerate() {
-                    println!("{INDENT}W{} r{}", w_idx, route_idx);
+                    if false {
+                        println!("{INDENT}W{} r{}", w_idx, route_idx);
+                    }
                     // Check if there's a shared block with one already in the list
-                    for bb_idx in route_1.blocks().skip(1) {
+                    'route: for bb_idx in route_1.blocks().skip(1) {
+                        // Skip this entire route once we find an already-known common block
                         if common_blocks.is_set(bb_idx) {
-                            continue;
+                            break;
                         }
                         if !any_other.is_set(bb_idx) {
-                            // None of the other arms involve this block, so don't bother
+                            // None of the other arms involve this block, so don't bother searching the tries
                             continue
                         }
                         // Search for a path in other write-arms that involve this block
-                        for (_, t) in tries.iter().enumerate().filter(|&(i,_)| i != w_idx) {
+                        for (i, t) in tries.iter().enumerate().filter(|&(i,_)| i != w_idx) {
+                            //println!("{INDENT} W{w_idx} R{route_idx} bb{bb_idx} on W{i}");
+                            let mut found = false;
                             t.visit(|_, &other_bb_idx| {
                                 if other_bb_idx == bb_idx {
-                                    if common_blocks.set(bb_idx) {
-                                        return VisitRes::StopAll;
+                                    if !common_blocks.set(bb_idx) {
+                                        println!("{INDENT}#{slot} [W{w_idx}/W{i}] Arms join at BB{bb_idx}");
                                     }
+                                    found = true;
+                                    VisitRes::StopAll
                                 }
-                                VisitRes::Continue
+                                else {
+                                    VisitRes::Continue
+                                }
                             });
+                            if found {
+                                break 'route;
+                            }
                         }
                     }
                 }
@@ -267,6 +279,7 @@ pub fn from_expr(mut ir: super::Expr) -> super::Expr
                             tgt.args.push(local);
                         }
                         else {
+                            println!("{INDENT}bb{block_idx} -> bb{b}: =arg {local:?}", b=tgt.index);
                             remap_table.insert(RemapKey { addr: super::visit::Addr { block_idx: super::BlockIndex(tgt.index), stmt_idx: 0}, after_read: false }, local);
                         }
                         if exit_table[tgt.index].is_none() {
