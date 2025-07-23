@@ -23,6 +23,7 @@ impl FailureList {
         FailureList { items: Default::default() }
     }
     fn push(&mut self, addr: super::visit::Addr, msg: String) {
+        println!(">>push() @{}: {}", addr, msg);
         self.items.push((addr, msg));
     }
     fn check(mut self, ir: &super::Expr) {
@@ -33,7 +34,9 @@ impl FailureList {
             for (addr,msg) in &self.items {
                 eprintln!("@{}: {}", addr, msg)
             }
-            let _ = super::dump::dump(&mut ::std::io::stdout().lock(), ir);
+            if false {
+                let _ = super::dump::dump(&mut ::std::io::stdout().lock(), ir);
+            }
             panic!("Validation failures found");
         }
     }
@@ -81,7 +84,7 @@ fn write_before_use(failures: &mut FailureList, ir: &super::Expr, arg_count: usi
                     // If the value isn't set in the incoming, then clear it in `s` and try again
                     if !states.is_set(i) {
                         if s.clear(i) {
-                            //println!("{INDENT}verify::#write_before_use::maybe_push: bb{} _{} unset", idx, i);
+                            println!("{INDENT}verify::#write_before_use::maybe_push: bb{} _{} unset", idx, i);
                             change = true;
                         }
                     }

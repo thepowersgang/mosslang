@@ -139,11 +139,16 @@ pub fn from_expr(mut ir: super::Expr) -> super::Expr
                         }
                     }
 
-                    println!("{INDENT}#{slot} [W{w_idx}] @{w} route = {:?} {}", route, if is_read { "read" } else if maybe_read { "maybe" } else { "unread" });
                     // Don't consider if this path doesn't read the value
                     if !(is_read || maybe_read) {
+                        if false {
+                            println!("{INDENT}#{slot} [W{w_idx}] @{w} route = {:?} {}", route, if is_read { "read" } else if maybe_read { "maybe" } else { "unread" });
+                        }
                     }
                     else {
+                        if true {
+                            println!("{INDENT}#{slot} [W{w_idx}] @{w} route = {:?} {}", route, if is_read { "read" } else if maybe_read { "maybe" } else { "unread" });
+                        }
                         // Add to list
                         // TODO: Trim the path/route to the last read (if it doesn't loop to before a read)
                         write_routes.push(route);
@@ -195,39 +200,26 @@ pub fn from_expr(mut ir: super::Expr) -> super::Expr
                 // TODO: This might be more efficient reversed, visiting the tries and seeing if there's a common block in an arm?
                 
                 for (route_idx,route_1) in this_routes.clone().enumerate() {
-                    if false {
-                        println!("{INDENT}W{} r{}", w_idx, route_idx);
+                    let mega_debug = false;
+                    if mega_debug {
+                        println!("{INDENT}W{} r{}: {:?}", w_idx, route_idx, route_1);
                     }
-                    // Check if there's a shared block with one already in the list
-                    'route: for bb_idx in route_1.blocks().skip(1) {
-                        // Skip this entire route once we find an already-known common block
-                        if common_blocks.is_set(bb_idx) {
-                            break;
-                        }
-                        if !any_other.is_set(bb_idx) {
-                            // None of the other arms involve this block, so don't bother searching the tries
-                            continue
-                        }
-                        // Search for a path in other write-arms that involve this block
-                        for (i, t) in tries.iter().enumerate().filter(|&(i,_)| i != w_idx) {
-                            //println!("{INDENT} W{w_idx} R{route_idx} bb{bb_idx} on W{i}");
-                            let mut found = false;
-                            t.visit(|_, &other_bb_idx| {
-                                if other_bb_idx == bb_idx {
-                                    if !common_blocks.set(bb_idx) {
-                                        println!("{INDENT}#{slot} [W{w_idx}/W{i}] Arms join at BB{bb_idx}");
-                                    }
-                                    found = true;
-                                    VisitRes::StopAll
+                    // Search for a path in other write-arms that involve this block
+                    for (i, t) in tries.iter().enumerate().filter(|&(i,_)| i != w_idx) {
+                        //println!("{INDENT} W{w_idx} R{route_idx} bb{bb_idx} on W{i}");
+                        let mut found = false;
+                        t.visit(|_, &other_bb_idx| {
+                            if route_1.blocks().skip(1).any(|v| v == other_bb_idx) {
+                                if !common_blocks.set(other_bb_idx) {
+                                    println!("{INDENT}#{slot} [W{w_idx}/W{i}] Arms join at BB{other_bb_idx}");
                                 }
-                                else {
-                                    VisitRes::Continue
-                                }
-                            });
-                            if found {
-                                break 'route;
+                                found = true;
+                                VisitRes::StopArm
                             }
-                        }
+                            else {
+                                VisitRes::Continue
+                            }
+                        });
                     }
                 }
             }
