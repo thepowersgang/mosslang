@@ -420,29 +420,37 @@ fn visit_block(out_state: &mut State, return_ptr: Option<cr_ir::Value>, block_id
             let x = out_state.read_value_single(value_l);
             let y = out_state.read_value_single(value_r);
             let v = match ir.locals[local_index.0].kind {
-                TypeKind::Integer(_) => match bin_op {
+                TypeKind::Integer(ity) => match bin_op {
                     BinOp::Add => out_state.builder.ins().iadd(x, y),
                     BinOp::Sub => out_state.builder.ins().isub(x, y),
                     BinOp::Mul => out_state.builder.ins().imul(x, y),
-                    BinOp::Div => todo!(),
-                    BinOp::Rem => todo!(),
-                    BinOp::BitOr => todo!(),
-                    BinOp::BitAnd => todo!(),
-                    BinOp::BitXor => todo!(),
+                    BinOp::Div => match ity.is_signed()
+                        {
+                        true => out_state.builder.ins().sdiv(x, y), // cspell:disable-line
+                        false => out_state.builder.ins().udiv(x, y), // cspell:disable-line
+                        },
+                    BinOp::Rem => match ity.is_signed()
+                        {
+                        true => out_state.builder.ins().srem(x, y), // cspell:disable-line
+                        false => out_state.builder.ins().urem(x, y), // cspell:disable-line
+                        },
+                    BinOp::BitOr => out_state.builder.ins().bor(x, y),
+                    BinOp::BitAnd => out_state.builder.ins().band(x, y),
+                    BinOp::BitXor => out_state.builder.ins().bxor(x, y), // cspell:disable-line
                 },
-                TypeKind::Pointer { is_const: _, ref inner } => match bin_op {
+                TypeKind::Pointer { is_const: _, ref inner } => {
+                    let elem_size = match inner.kind {
+                        TypeKind::Void => 1,
+                        _ => out_state.outer_state.type_info(&inner).size(),
+                    };
+                    match bin_op {
                     BinOp::Add => {
-                        let ti = out_state.outer_state.type_info(&inner);
-                        let y = out_state.builder.ins().imul_imm(y, ti.size() as i64);
+                        let y = out_state.builder.ins().imul_imm(y, elem_size as i64);
                         out_state.builder.ins().iadd(x, y)
                     },
                     BinOp::Sub => todo!(),
-                    BinOp::Mul => todo!(),
-                    BinOp::Div => todo!(),
-                    BinOp::Rem => todo!(),
-                    BinOp::BitOr => todo!(),
-                    BinOp::BitAnd => todo!(),
-                    BinOp::BitXor => todo!(),
+                    _ => panic!("Invalid {:?} on pointer", bin_op),
+                    }
                 },
                 _ => todo!("BinOp on {}", ir.locals[local_index.0]),
             };
@@ -532,15 +540,18 @@ fn visit_block(out_state: &mut State, return_ptr: Option<cr_ir::Value>, block_id
             let x = out_state.read_value_single(value_l);
             let y = out_state.read_value_single(value_r);
             let v = match ir.locals[local_index.0].kind {
-                TypeKind::Integer(crate::ast::ty::IntClass::PtrDiff|crate::ast::ty::IntClass::Signed(_)) => match bit_shift
+                TypeKind::Integer(int_ty) => match int_ty.is_signed()
                     {
-                    ms_ir::BitShift::Left => todo!(),
-                    ms_ir::BitShift::Right => todo!(),
-                    },
-                TypeKind::Integer(crate::ast::ty::IntClass::PtrInt|crate::ast::ty::IntClass::Unsigned(_)) => match bit_shift
-                    {
-                    ms_ir::BitShift::Left => todo!(),
-                    ms_ir::BitShift::Right => out_state.builder.ins().ushr(x, y),
+                    true => match bit_shift
+                        {
+                        ms_ir::BitShift::Left => out_state.builder.ins().ishl(x, y),
+                        ms_ir::BitShift::Right => out_state.builder.ins().sshr(x, y),
+                        },
+                    false => match bit_shift
+                        {
+                        ms_ir::BitShift::Left => out_state.builder.ins().ishl(x, y),
+                        ms_ir::BitShift::Right => out_state.builder.ins().ushr(x, y),
+                        },
                     },
                 _ => todo!("BitShift on {}", ir.locals[local_index.0]),
                 };

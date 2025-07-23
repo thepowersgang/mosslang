@@ -211,6 +211,16 @@ pub enum IntClass {
     /// Unsigned integer with explicit size (size stored as log2 bytes)
     Unsigned(u8),
 }
+impl IntClass {
+    pub fn is_signed(&self) -> bool {
+        match self {
+        IntClass::PtrInt => false,
+        IntClass::PtrDiff => true,
+        IntClass::Signed(_) => true,
+        IntClass::Unsigned(_) => false,
+        }
+    }
+}
 
 #[derive(Debug)]
 pub enum ArraySize {
