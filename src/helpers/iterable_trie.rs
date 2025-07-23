@@ -124,6 +124,7 @@ pub struct VisitInfo {
     #[allow(dead_code)]
     pub is_leaf: bool,
 }
+#[allow(dead_code)]
 pub enum VisitRes {
     /// Continue visiting this arm and all others
     Continue,

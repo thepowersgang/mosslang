@@ -626,13 +626,7 @@ fn visit_block(out_state: &mut State, return_ptr: Option<cr_ir::Value>, block_id
         let is_signed = match ty.map(|v| &v.kind)
             {
             None => None,
-            Some(TypeKind::Integer(ik)) => Some(match ik
-                {
-                crate::ast::ty::IntClass::Unsigned(_)
-                | crate::ast::ty::IntClass::PtrInt => false,
-                crate::ast::ty::IntClass::Signed(_)
-                | crate::ast::ty::IntClass::PtrDiff => false,
-                }),
+            Some(TypeKind::Integer(ik)) => Some(ik.is_signed()),
             Some(TypeKind::Pointer { .. }) => Some(false),
             Some(_) => None,
             };
