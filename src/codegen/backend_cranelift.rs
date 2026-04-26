@@ -1034,12 +1034,12 @@ impl<'ir, 'a, 'a1> State<'ir, 'a, 'a1> {
                     use crate::ast::path::TypeBinding;
                     match p {
                     TypeBinding::Alias(_) => panic!("Field on type alias"),
-                    TypeBinding::Union(absolute_path) => todo!(),
+                    TypeBinding::Union(absolute_path) => todo!("Union {:?}", absolute_path),
                     TypeBinding::Struct(absolute_path) => {
                         ty = self.outer_state.field_types[absolute_path][idx];
                     },
                     TypeBinding::ValueEnum(_) => panic!("Field on value enum?"),
-                    TypeBinding::DataEnum(absolute_path) => todo!(),
+                    TypeBinding::DataEnum(absolute_path) => todo!("DataEnum {:?}", absolute_path),
                     TypeBinding::EnumVariant(_, _) => panic!("Bound to enum variant?"),
                     }
                 }

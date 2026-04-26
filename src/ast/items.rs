@@ -17,7 +17,7 @@ pub struct Item
 /// Item type for a module-level item
 pub enum ItemType
 {
-    //Module(Module),
+    Module(Module),
 
     ExternBlock(ExternBlock),
 

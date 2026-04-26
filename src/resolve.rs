@@ -49,10 +49,10 @@ fn resolve_mod(lc: &LookupCache, module: &mut crate::ast::items::Module)
             types: Default::default(),
             values: Default::default(),
         };
-        for v in &module.items {
+        for v in &mut module.items {
             use crate::ast::items::ItemType;
-            match &v.ty {
-            //ItemType::Module(module) => resolve_mod(lc, module),
+            match &mut v.ty {
+            ItemType::Module(module) => resolve_mod(lc, module),
             ItemType::ExternBlock(eb) => {
                 for i in &eb.items {
                     match i.ty {
@@ -114,7 +114,7 @@ fn resolve_mod(lc: &LookupCache, module: &mut crate::ast::items::Module)
         use crate::ast::items::ItemType;
         let mut cx = Context::new(&item_scope);
         match &mut v.ty {
-        //crate::ast::items::ItemType::Module(module) => expand_module(module),
+        crate::ast::items::ItemType::Module(module) => resolve_mod(lc, module),
         ItemType::ExternBlock(eb) => {
             for v in &mut eb.items {
                 match &mut v.ty {

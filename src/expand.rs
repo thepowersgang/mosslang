@@ -17,7 +17,7 @@ fn expand_module(module: &mut super::ast::items::Module) {
     for v in &mut module.items {
         use crate::ast::items::ItemType;
         match &mut v.ty {
-        //crate::ast::items::ItemType::Module(module) => expand_module(module),
+        ItemType::Module(module) => expand_module(module),
         ItemType::ExternBlock(eb) => {
             eb.items.retain_mut(|v| check_attrs(&mut v.attributes));
         },

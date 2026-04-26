@@ -32,7 +32,7 @@ fn enumerate_mod(lc: &mut LookupContext, module: &crate::ast::items::Module, pat
     for v in &module.items {
         use crate::ast::items::ItemType;
         match &v.ty {
-        //ItemType::Module(module) => enumerate_mod(lc, module),
+        ItemType::Module(module) => enumerate_mod(lc, module, &path.append(v.name.clone().expect("Unnamed module"))),
         ItemType::ExternBlock(eb) => {
             for i in &eb.items {
                 use crate::ast::items::ExternItemType;
@@ -108,7 +108,7 @@ fn typecheck_mod(lc: &LookupContext, module: &mut crate::ast::items::Module)
     for v in &mut module.items {
         use crate::ast::items::ItemType;
         match &mut v.ty {
-        //crate::ast::items::ItemType::Module(module) => typecheck_mod(module),
+        ItemType::Module(module) => typecheck_mod(lc, module),
         ItemType::ExternBlock(_eb) => {
         },
         ItemType::TypeAlias(_ty) => {

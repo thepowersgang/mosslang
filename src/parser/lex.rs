@@ -224,6 +224,7 @@ pub enum ReservedWord {
     Union,
     Enum,
     Extern,
+    Mod,
 
     Const,
     Mut,
@@ -250,6 +251,8 @@ pub enum ReservedWord {
 
     Sizeof,
     Typeof,
+
+    Pub,
 }
 macro_rules! define_punct {
     ( $( $name:ident => $($l:literal)* ),* $(,)? ) => {

@@ -125,7 +125,7 @@ impl<'a> InnerState<'a> {
                 match type_binding {
                 TypeBinding::Alias(_) => panic!("Unresolved type alias during codegen. {:?}", ty),
                 TypeBinding::EnumVariant(_, _) => panic!("Type resolved to EnumVariant, only valid in patterns"),
-                TypeBinding::Union(absolute_path) => todo!(),
+                TypeBinding::Union(absolute_path) => todo!("Union {:?}", absolute_path),
                 TypeBinding::Struct(absolute_path) => {
                     let Some(f) = self.fields.get(absolute_path) else { panic!("struct missing from fields map: {:?}", ty) };
                     let mut fields: Vec<_> = f.values().collect();
@@ -150,11 +150,11 @@ impl<'a> InnerState<'a> {
                 TypeBinding::ValueEnum(_absolute_path) => {
                     TypeInfo::make_primitive(IntClass::Unsigned(2))
                 },
-                TypeBinding::DataEnum(absolute_path) => todo!(),
+                TypeBinding::DataEnum(absolute_path) => todo!("DataEnum {:?}", absolute_path),
                 }
             },
             TypeKind::Pointer { .. } => TypeInfo::make_primitive(IntClass::PtrInt),
-            TypeKind::Array { inner, count } => todo!(),
+            TypeKind::Array { .. } => todo!("TypeKind::Array"),
             TypeKind::UnsizedArray(inner) => TypeInfo::make_array(0, self.type_info(inner)),
             });
         self.types_cache.borrow_mut().entry(ty.clone()).or_insert(new).clone()
@@ -176,6 +176,8 @@ impl<'a> State<'a> {
             | ItemType::Union(_)
             | ItemType::Constant(_)
                 => {},
+                
+            ItemType::Module(module) => self.visit_module(module),
 
             ItemType::Function(fcn) => self.emit_function(item.name.as_ref().unwrap(), fcn),
             ItemType::Static(s) => self.emit_static(item.name.as_ref().unwrap(), s),

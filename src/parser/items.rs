@@ -19,6 +19,8 @@ pub fn parse_module(lex: &mut Lexer, mod_attrs: &mut Vec<crate::ast::Attribute>)
         let mut attributes = parse_attributes(lex, rv.items.is_empty().then_some(mod_attrs))?;
 
         // TODO: Get publicity? (no publicity implemented)
+        if lex.opt_consume_rword(lex::ReservedWord::Pub)? {
+        }
 
         match match lex.consume() {
             None => {
@@ -139,6 +141,18 @@ pub fn parse_module(lex: &mut Lexer, mod_attrs: &mut Vec<crate::ast::Attribute>)
             rv.items.push(crate::ast::items::Item {
                 name: Some(name),
                 ty: crate::ast::items::ItemType::Function(i),
+                attributes,
+            });
+            },
+        
+        lex::Token::RWord(lex::ReservedWord::Mod) => {
+            let name = lex.consume_ident()?;
+            lex.consume_punct(lex::Punct::BraceOpen)?;
+            let i = parse_module(lex, &mut attributes)?;
+            lex.consume_punct(lex::Punct::BraceClose)?;
+            rv.items.push(crate::ast::items::Item {
+                name: Some(name),
+                ty: crate::ast::items::ItemType::Module(i),
                 attributes,
             });
             },
