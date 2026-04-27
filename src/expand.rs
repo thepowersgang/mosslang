@@ -18,6 +18,7 @@ fn expand_module(module: &mut super::ast::items::Module) {
         use crate::ast::items::ItemType;
         match &mut v.ty {
         ItemType::Module(module) => expand_module(module),
+        ItemType::Use(_) => {},
         ItemType::ExternBlock(eb) => {
             eb.items.retain_mut(|v| check_attrs(&mut v.attributes));
         },
@@ -37,7 +38,8 @@ fn expand_module(module: &mut super::ast::items::Module) {
                 }
             }
         },
-        ItemType::Union(_) => {
+        ItemType::Union(u) => {
+            u.variants.retain_mut(|v| check_attrs(&mut v.attributes));
         },
         ItemType::Function(function) => {
             expand_expr(&mut function.code);

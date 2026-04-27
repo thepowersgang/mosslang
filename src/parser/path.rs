@@ -20,14 +20,14 @@ fn parse_path(lex: &mut Lexer) -> Result<crate::ast::Path> {
             crate::ast::path::Root::Root
         }
         else if lex.opt_consume_rword(lex::ReservedWord::Self_)? {
-            lex.check_punct(lex::Punct::DoubleColon)?;
+            lex.consume_punct(lex::Punct::DoubleColon)?;
             crate::ast::path::Root::Current
         }
         else if lex.opt_consume_rword(lex::ReservedWord::Super)? {
-            lex.check_punct(lex::Punct::DoubleColon)?;
+            lex.consume_punct(lex::Punct::DoubleColon)?;
             let mut extra_count = 0;
             while lex.opt_consume_rword(lex::ReservedWord::Super)? {
-                lex.check_punct(lex::Punct::DoubleColon)?;
+                lex.consume_punct(lex::Punct::DoubleColon)?;
                 extra_count += 1;
             }
             crate::ast::path::Root::Super(extra_count)

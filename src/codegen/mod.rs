@@ -169,6 +169,7 @@ impl<'a> State<'a> {
         for item in &module.items {
             use crate::ast::items::ItemType;
             match &item.ty {
+            | ItemType::Use(_)
             | ItemType::ExternBlock(_)
             | ItemType::TypeAlias(_)
             | ItemType::Struct(_)

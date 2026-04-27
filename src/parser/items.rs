@@ -32,6 +32,81 @@ pub fn parse_module(lex: &mut Lexer, mod_attrs: &mut Vec<crate::ast::Attribute>)
             Some(v) => v,
             }
         {
+        lex::Token::RWord(lex::ReservedWord::Use) => {
+            println!("use");
+            todo!("Parse `use` once they're implemented in resolve");
+            let root = if lex.opt_consume_rword(lex::ReservedWord::Self_)? {
+                    lex.consume_punct(lex::Punct::DoubleColon)?;
+                    crate::ast::path::Root::Current
+                }
+                else if lex.opt_consume_rword(lex::ReservedWord::Super)? {
+                    let mut i = 0;
+                    lex.consume_punct(lex::Punct::DoubleColon)?;
+                    while lex.opt_consume_rword(lex::ReservedWord::Super)? {
+                        i += 1;
+                        lex.consume_punct(lex::Punct::DoubleColon)?;
+                    }
+                    crate::ast::path::Root::Super(i)
+                }
+                else if lex.opt_consume_punct(lex::Punct::DoubleColon)? {
+                    crate::ast::path::Root::Root
+                }
+                else {
+                    crate::ast::path::Root::None
+                };
+            let mut items = Vec::new();
+            fn get_items(items: &mut Vec<crate::ast::items::UseItem>, lex: &mut Lexer, mut path: crate::ast::Path) -> Result<()> {
+                let ps = lex.start_span();
+                if lex.opt_consume_punct(lex::Punct::BraceOpen)? {
+                    while !lex.opt_consume_punct(lex::Punct::BraceClose)? {
+                        get_items(items, lex, path.clone())?;
+                        if !lex.opt_consume_punct(lex::Punct::Comma)? {
+                            lex.consume_punct(lex::Punct::BraceClose)?;
+                            break;
+                        }
+                    }
+                    return Ok(());
+                }
+                else if lex.opt_consume_punct(lex::Punct::Star)? {
+                    items.push(crate::ast::items::UseItem { 
+                        span: lex.end_span(&ps),
+                        path,
+                        ty: crate::ast::items::UseTy::Glob,
+                    });
+                    return Ok(());
+                }
+                else if lex.opt_consume_rword(lex::ReservedWord::Self_)? {
+                    // Current path
+                }
+                else {
+                    path.components.push(lex.consume_ident()?);
+                    if lex.opt_consume_punct(lex::Punct::DoubleColon)? {
+                        return get_items(items, lex, path);
+                    }
+                };
+                let ty = if lex.opt_consume_rword(lex::ReservedWord::As)? {
+                        crate::ast::items::UseTy::Renamed(lex.consume_ident()?)
+                    }
+                    else {
+                        crate::ast::items::UseTy::AsIs
+                    };
+                items.push(crate::ast::items::UseItem {
+                    span: lex.end_span(&ps),
+                    path,
+                    ty,
+                });
+                Ok(())
+            }
+            get_items(&mut items, lex, crate::ast::Path { root, components: Vec::new() })?;
+            lex.consume_punct(lex::Punct::Semicolon)?;
+            rv.items.push(crate::ast::items::Item {
+                name: None,
+                ty: crate::ast::items::ItemType::Use(crate::ast::items::Use {
+                    items,
+                }),
+                attributes,
+                });
+        },
         lex::Token::RWord(lex::ReservedWord::Type) => {
             println!("type alias");
             let name = lex.consume_ident()?;
@@ -279,6 +354,7 @@ fn parse_extern_block(lex: &mut Lexer, abi: crate::ast::AbiSpec, mut outer_attrs
     let mut items = Vec::new();
     loop {
         let attributes = parse_attributes( lex, items.is_empty().then_some(&mut outer_attrs) )?;
+        let _is_pub = lex.opt_consume_rword(lex::ReservedWord::Pub)?;
         match lex.consume_no_eof()?
         {
         lex::Token::Punct(lex::Punct::BraceClose) => break,

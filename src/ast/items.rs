@@ -18,6 +18,7 @@ pub struct Item
 pub enum ItemType
 {
     Module(Module),
+    Use(Use),
 
     ExternBlock(ExternBlock),
 
@@ -29,6 +30,21 @@ pub enum ItemType
     Static(Static),
     Constant(Constant),
     // Note: No impl blocks or traits
+}
+
+pub struct Use
+{
+    pub items: Vec<UseItem>,
+}
+pub struct UseItem {
+    pub span: crate::Span,
+    pub path: super::Path,
+    pub ty: UseTy,
+}
+pub enum UseTy {
+    AsIs,
+    Renamed(crate::Ident),
+    Glob,
 }
 
 pub struct ExternBlock

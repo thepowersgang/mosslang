@@ -26,9 +26,13 @@ impl Path
 #[derive(PartialOrd,Ord,PartialEq,Eq)]
 pub enum Root
 {
+    /// No prefix to the path, same as `current`?
     None,   // Relative
+    /// Relative to the current module (i.e. `self::`)
     Current,
+    /// Relative to a parent module, the count is the number of parents to skip (i.e. `Super(0)` means `super::`)
     Super(usize),
+    /// Relative to the crate root (`crate::` or `::foo`)
     Root,
 }
 

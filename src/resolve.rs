@@ -6,115 +6,127 @@ use crate::INDENT;
 
 #[derive(Default)]
 struct LookupCache {
-    type_aliases: HashMap<AbsolutePath, crate::ast::Type>,
+    //type_aliases: HashMap<AbsolutePath, crate::ast::Type>,
+    modules: HashMap<AbsolutePath, ModuleIndex>,
+}
+struct ModuleIndex {
+    path: AbsolutePath,
+    types: HashMap<crate::Ident, TypeEnt>,
+    values: HashMap<crate::Ident, ValueBinding>,
+}
+enum VariantInfo {
+    Value,
+    Type,
+}
+enum TypeEnt {
+    Module(AbsolutePath),
+    Enum(AbsolutePath, bool, HashMap<crate::Ident, (usize, VariantInfo,)>),
+    Type(TypeBinding),
+}
+impl From<TypeBinding> for TypeEnt {
+    fn from(value: TypeBinding) -> Self {
+        TypeEnt::Type(value)
+    }
 }
 
 pub fn resolve(ast_crate: &mut crate::ast::Crate)
 {
     println!("resolve");
 
-    // Type aliases
     let mut lc = LookupCache::default();
-    fill_lc(&mut lc, &ast_crate.module, AbsolutePath(Vec::new()));
+    fill_index(&mut lc, &ast_crate.module, AbsolutePath(Vec::new()));
 
-    resolve_mod(&lc, &mut ast_crate.module)
+    resolve_mod(&lc, &mut ast_crate.module, AbsolutePath(Vec::new()));
+
+    //resolve_type_aliases();
 }
 
-fn fill_lc(lc: &mut LookupCache, module: &crate::ast::items::Module, path: AbsolutePath)
+/// Fill the lookup cache for a module
+fn fill_index(lc: &mut LookupCache, module: &crate::ast::items::Module, path: AbsolutePath)
 {
-    for i in &module.items {
+    let mut mod_index = ModuleIndex {
+        path: path.clone(),
+        types: Default::default(),
+        values: Default::default(),
+    };
+    for v in &module.items {
         use crate::ast::items::ItemType;
-        match &i.ty {
-        //ItemType::Module(module) => fill_lc(lc, module),
-        ItemType::TypeAlias(ty) => {
-            lc.type_aliases.insert(path.append(i.name.as_ref().unwrap().clone()), ty.clone());
+        match &v.ty {
+        ItemType::Use(_) => todo!("Handle `use`"),
+        ItemType::Module(module) => {
+            let name = v.name.clone().unwrap();
+            let p = path.append(name.clone());
+            mod_index.types.insert(name, TypeEnt::Module(p.clone()));
+            fill_index(lc, module, p)
         },
-        _ => {},
+        ItemType::TypeAlias(ty) => {
+            let name = v.name.clone().unwrap();
+            //lc.type_aliases.insert(path.append(name.clone()), ty.clone());
+            mod_index.types.insert(name.clone(), TypeBinding::Alias(path.append(name)).into());
+        },
+        
+        ItemType::ExternBlock(eb) => {
+            for i in &eb.items {
+                match i.ty {
+                crate::ast::items::ExternItemType::Function(_) => {
+                    mod_index.values.insert(i.name.clone(), ValueBinding::Function(path.append(i.name.clone())));
+                },
+                crate::ast::items::ExternItemType::Static(_) => {
+                    mod_index.values.insert(i.name.clone(), ValueBinding::Static(path.append(i.name.clone())));
+                },
+                };
+            }
+            },
+        ItemType::Enum(enm) => {
+            let name = v.name.clone().unwrap();
+            let mut had_data = false;
+            let vi = enm.variants.iter().enumerate().map(|(i, v)| (v.name.clone(), (i, match v.ty {
+                crate::ast::items::EnumVariantTy::Bare => VariantInfo::Value,
+                crate::ast::items::EnumVariantTy::Value(_) => VariantInfo::Value,
+                crate::ast::items::EnumVariantTy::Data(_) => { had_data = true; VariantInfo::Type },
+                },),)).collect();
+            let p = path.append(name.clone());
+            mod_index.types.insert(name, TypeEnt::Enum(p, had_data, vi));
+        },
+        ItemType::Struct(_) => {
+            let name = v.name.clone().unwrap();
+            mod_index.types.insert(name.clone(), TypeBinding::Struct(path.append(name)).into());
+        },
+        ItemType::Union(_) => {
+            let name = v.name.clone().unwrap();
+            mod_index.types.insert(name.clone(), TypeBinding::Union(path.append(name)).into());
+        },
+        ItemType::Function(_) => {
+            let name = v.name.clone().unwrap();
+            mod_index.values.insert(name.clone(), ValueBinding::Function(path.append(name)));
+        },
+        ItemType::Static(_) => {
+            let name = v.name.clone().unwrap();
+            mod_index.values.insert(name.clone(), ValueBinding::Static(path.append(name)));
+        },
+        ItemType::Constant(_) => {
+            let name = v.name.clone().unwrap();
+            mod_index.values.insert(name.clone(), ValueBinding::Constant(path.append(name)));
+        },
         }
     }
+    lc.modules.insert(path, mod_index);
 }
 
-fn resolve_mod(lc: &LookupCache, module: &mut crate::ast::items::Module)
+fn resolve_mod(lc: &LookupCache, module: &mut crate::ast::items::Module, path: AbsolutePath)
 {
     let _i = INDENT.inc("resolve_mod");
     println!("{INDENT}resolve_mod: {} items", module.items.len());
 
     // Make a list of items for use by inner resolve
-    let item_scope = {
-        let get_ap = |name| {
-            AbsolutePath(vec![name])
-        };
-        let mut item_scope = ItemScope {
-            lc,
-            types: Default::default(),
-            values: Default::default(),
-        };
-        for v in &mut module.items {
-            use crate::ast::items::ItemType;
-            match &mut v.ty {
-            ItemType::Module(module) => resolve_mod(lc, module),
-            ItemType::ExternBlock(eb) => {
-                for i in &eb.items {
-                    match i.ty {
-                    crate::ast::items::ExternItemType::Function(_) => {
-                        item_scope.values.insert(i.name.clone(), ValueBinding::Function(get_ap(i.name.clone())));
-                    },
-                    crate::ast::items::ExternItemType::Static(_) => {
-                        item_scope.values.insert(i.name.clone(), ValueBinding::Static(get_ap(i.name.clone())));
-                    },
-                    };
-                }
-                },
-            ItemType::Enum(enm) => {
-                let name = v.name.clone().unwrap();
-                let mut had_data = false;
-                let vi = enm.variants.iter().enumerate().map(|(i, v)| (v.name.clone(), (i, match v.ty {
-                    crate::ast::items::EnumVariantTy::Bare => VariantInfo::Value,
-                    crate::ast::items::EnumVariantTy::Value(_) => VariantInfo::Value,
-                    crate::ast::items::EnumVariantTy::Data(_) => { had_data = true; VariantInfo::Type },
-                    },),)).collect();
-                let tb = if had_data {
-                    TypeBinding::DataEnum(get_ap(name.clone()))
-                }
-                else {
-                    TypeBinding::ValueEnum(get_ap(name.clone()))
-                };
-                item_scope.types.insert(name, (tb, Some(vi)));
-            },
-            ItemType::TypeAlias(_) => {
-                let name = v.name.clone().unwrap();
-                item_scope.types.insert(name.clone(), (TypeBinding::Alias(get_ap(name)), None,));
-            },
-            ItemType::Struct(_) => {
-                let name = v.name.clone().unwrap();
-                item_scope.types.insert(name.clone(), (TypeBinding::Struct(get_ap(name)),None,));
-            },
-            ItemType::Union(_) => {
-                let name = v.name.clone().unwrap();
-                item_scope.types.insert(name.clone(), (TypeBinding::Union(get_ap(name)),None,));
-            },
-            ItemType::Function(_) => {
-                let name = v.name.clone().unwrap();
-                item_scope.values.insert(name.clone(), ValueBinding::Function(get_ap(name)));
-            },
-            ItemType::Static(_) => {
-                let name = v.name.clone().unwrap();
-                item_scope.values.insert(name.clone(), ValueBinding::Static(get_ap(name)));
-            },
-            ItemType::Constant(_) => {
-                    let name = v.name.clone().unwrap();
-                    item_scope.values.insert(name.clone(), ValueBinding::Constant(get_ap(name)));
-            },
-            };
-        }
-        item_scope
-    };
+    let item_scope = lc.modules.get(&path).expect("Module index not populated");
 
     for v in &mut module.items {
         use crate::ast::items::ItemType;
-        let mut cx = Context::new(&item_scope);
+        let mut cx = Context::new(lc, &item_scope);
         match &mut v.ty {
-        crate::ast::items::ItemType::Module(module) => resolve_mod(lc, module),
+        ItemType::Module(module) => resolve_mod(lc, module, path.append(v.name.clone().unwrap())),
+        ItemType::Use(_) => {},
         ItemType::ExternBlock(eb) => {
             for v in &mut eb.items {
                 match &mut v.ty {
@@ -143,7 +155,7 @@ fn resolve_mod(lc: &LookupCache, module: &mut crate::ast::items::Module)
                 match &mut v.ty {
                 crate::ast::items::EnumVariantTy::Bare => {},
                 crate::ast::items::EnumVariantTy::Value(expr_root) => {
-                    resolve_expr(&item_scope, expr_root, &mut [])
+                    resolve_expr(lc, &item_scope, expr_root, &mut [])
                     },
                 crate::ast::items::EnumVariantTy::Data(_) => todo!(),
                 }
@@ -157,53 +169,99 @@ fn resolve_mod(lc: &LookupCache, module: &mut crate::ast::items::Module)
                 cx.resolve_type(&mut a.1);
             }
             cx.resolve_type(&mut function.sig.ret);
-            resolve_expr(&item_scope, &mut function.code, &mut function.sig.args);
+            resolve_expr(lc, &item_scope, &mut function.code, &mut function.sig.args);
         },
         ItemType::Static(s) => {
             println!("{INDENT}resolve_mod: Static {}", v.name.as_ref().unwrap());
             cx.resolve_type(&mut s.ty);
-            resolve_expr(&item_scope, &mut s.value, &mut []);
+            resolve_expr(lc, &item_scope, &mut s.value, &mut []);
         },
         ItemType::Constant(i) => {
             cx.resolve_type(&mut i.ty);
-            resolve_expr(&item_scope, &mut i.value, &mut []);
+            resolve_expr(lc, &item_scope, &mut i.value, &mut []);
         },
         }
     }
 }
-
-enum VariantInfo {
-    Value,
-    Type,
-}
-struct ItemScope<'a> {
-    lc: &'a LookupCache, 
-    types: HashMap<crate::Ident, (crate::ast::path::TypeBinding, Option<HashMap<crate::Ident, (usize, VariantInfo,)>>,)>,
-    values: HashMap<crate::Ident, crate::ast::path::ValueBinding>,
+fn resolve_type_aliases()
+{
 }
 
-fn resolve_path_type(item_scope: &ItemScope, span: &crate::Span, p: &crate::ast::Path) -> crate::ast::path::TypeBinding {
-    assert!(matches!(p.root, crate::ast::path::Root::None));
-    let c = p.components.first().expect("Empty path?");
-    if p.components.len() == 2 {
-        let vn = &p.components[1];
-        if let Some((ap, Some(variants))) = item_scope.types.get(c) {
-            if let Some((idx, VariantInfo::Value)) = variants.get(vn) {
-                let (TypeBinding::DataEnum(ap)|TypeBinding::ValueEnum(ap)) = ap else { unreachable!() };
-                return crate::ast::path::TypeBinding::EnumVariant(ap.append(vn.clone()), *idx)
+enum PathParent<'a> {
+    Module(&'a ModuleIndex),
+    Enum(&'a AbsolutePath, bool, &'a HashMap<crate::Ident, (usize, VariantInfo,)>),
+}
+fn resolve_path_parent<'lc, 'p>(lc: &'lc LookupCache, item_scope: &'lc ModuleIndex, span: &crate::Span, p: &'p crate::ast::Path) -> (PathParent<'lc>, &'p crate::Ident) {
+    use crate::ast::path::Root;
+    let item_scope = match p.root {
+        | Root::None // Look up in the current function then current module
+        | Root::Current // current module only, explicit
+        => {
+            item_scope
+        },
+        Root::Super(extra_count) => {
+            let mut path = item_scope.path.clone();
+            path.0.pop().expect("");
+            for _ in 0 .. extra_count {
+                path.0.pop().expect("");
             }
+            lc.modules.get(&path).unwrap()
+        },
+        Root::Root => lc.modules.get(&AbsolutePath(Vec::new())).unwrap(),
+        };
+    assert!(p.components.len() > 0);
+    let c = p.components.last().expect("Empty path?");
+    let mut item_scope = item_scope;
+    for i in 0 .. p.components.len() - 1 {
+        let n = &p.components[i];
+        let Some(t) = item_scope.types.get(n) else {
+            panic!("{span}: Unable to find component {n} of path {p:?}", span=span)
+        };
+        match t {
+        TypeEnt::Module(absolute_path) => item_scope = lc.modules.get(absolute_path).expect("Module has no index"),
+        TypeEnt::Enum(ap, is_data, variants) => {
+            if i != p.components.len() - 2 {
+                panic!("{span}: Getting child item of invalid type (enum variant)", span=span);
+            }
+            return (PathParent::Enum(&ap, *is_data, &variants), c,);
+        },
+        TypeEnt::Type(_) => panic!("{span}: Getting child item of invalid type", span=span)
         }
     }
-    if p.components.len() == 1 {
-        if let Some((v,_)) = item_scope.types.get(c) {
-            return v.clone();
+    (PathParent::Module(item_scope), c)
+}
+
+fn resolve_path_type(lc: &LookupCache, item_scope: &ModuleIndex, span: &crate::Span, p: &crate::ast::Path) -> TypeBinding {
+    let (par, c) = resolve_path_parent(lc, item_scope, span, p);
+    match par {
+    PathParent::Module(item_scope) => {
+        let Some(t) = item_scope.types.get(c) else {
+            panic!("{span}: Unable to find component {c} of path {p:?} (in {mp})", p=p, mp=item_scope.path);
+        };
+        match t
+        {
+        TypeEnt::Module(_) => todo!(),
+        TypeEnt::Enum(absolute_path, is_data, _) => if *is_data {
+            TypeBinding::DataEnum(absolute_path.clone())
         }
+        else {
+            TypeBinding::ValueEnum(absolute_path.clone())
+        },
+        TypeEnt::Type(type_binding) => type_binding.clone(),
+        }
+        },
+    PathParent::Enum(ap, _is_data, variants) => {
+        if let Some((idx, VariantInfo::Type)) = variants.get(c) {
+            return TypeBinding::EnumVariant(ap.append(c.clone()), *idx)
+        }
+        panic!("{span}: Unable to find component {c} of path {p:?}", p=p)
+        },
     }
-    todo!("{} Resolve type path {:?}", span, p);
 }
 
 struct Context<'a> {
-    item_scope: &'a ItemScope<'a>,
+    lc: &'a LookupCache,
+    item_scope: &'a ModuleIndex,
     next_index: u32,
     layers: Vec<ContextLayer>,
 }
@@ -212,8 +270,9 @@ struct ContextLayer {
     names: ::std::collections::HashMap<crate::Ident, u32>,
 }
 impl<'a> Context<'a> {
-    fn new(item_scope: &'a ItemScope) -> Self {
+    fn new(lc: &'a LookupCache, item_scope: &'a ModuleIndex) -> Self {
         Context {
+            lc,
             item_scope,
             next_index: 0,
             layers: Vec::new(),
@@ -247,16 +306,8 @@ impl<'a> Context<'a> {
         },
         TypeKind::Named(ref mut path) => {
             if let crate::ast::ty::TypePath::Unresolved(raw_path) = path {
-                let r = resolve_path_type(self.item_scope, &ty.span, raw_path);
-                if let TypeBinding::Alias(t) = r {
-                    let a = self.item_scope.lc.type_aliases.get(&t).expect("Missing TypeAlias");
-                    *ty = a.clone();
-                    // Recurse
-                    self.resolve_type(ty);
-                }
-                else {
-                    *path = crate::ast::ty::TypePath::Resolved(r);
-                }
+                let r = resolve_path_type(self.lc, self.item_scope, &ty.span, raw_path);
+                *path = crate::ast::ty::TypePath::Resolved(r);
             }
         },
         TypeKind::Pointer { is_const: _, inner } => {
@@ -265,7 +316,7 @@ impl<'a> Context<'a> {
         TypeKind::Array { inner, count } => {
             self.resolve_type(inner);
             match count {
-            crate::ast::ty::ArraySize::Unevaluated(expr_root) => resolve_expr(self.item_scope, expr_root, &mut []),
+            crate::ast::ty::ArraySize::Unevaluated(expr_root) => resolve_expr(self.lc, self.item_scope, expr_root, &mut []),
             crate::ast::ty::ArraySize::Known(_) => {},
             }
         },
@@ -278,32 +329,37 @@ impl<'a> Context<'a> {
         }
     }
 
-    fn resolve_path_value(&self, span: &crate::parser::lex::Span, p: &mut crate::ast::Path) -> crate::ast::path::ValueBinding {
-        assert!(matches!(p.root, crate::ast::path::Root::None));
-        let c = p.components.first().expect("Empty path?");
-        if p.components.len() == 2 {
-            let vn = &p.components[1];
-            if let Some((ap, Some(variants))) = self.item_scope.types.get(c) {
-                if let Some((idx, VariantInfo::Value)) = variants.get(vn) {
-                    return match ap {
-                    TypeBinding::DataEnum(ap) => crate::ast::path::ValueBinding::DataEnumVariant(ap.append(vn.clone()), *idx),
-                    TypeBinding::ValueEnum(ap) => crate::ast::path::ValueBinding::ValueEnumVariant(ap.append(vn.clone()), *idx),
-                    _ => unreachable!(),
-                    };
+    fn resolve_path_value(&self, span: &crate::parser::lex::Span, p: &mut crate::ast::Path) -> ValueBinding {
+        // Handle variables first
+        if let crate::ast::path::Root::Current = p.root {
+            if p.components.len() == 1 {
+                let c = p.components.first().expect("Empty path?");
+                for layer in self.layers.iter().rev() {
+                    if let Some(v) = layer.names.get(c) {
+                        return ValueBinding::Local(*v);
+                    }
                 }
             }
         }
-        if p.components.len() == 1 {
-            for layer in self.layers.iter().rev() {
-                if let Some(v) = layer.names.get(c) {
-                    return crate::ast::path::ValueBinding::Local(*v);
-                }
-            }
-            if let Some(v) = self.item_scope.values.get(c) {
-                return v.clone();
-            }
+
+        let (par, c) = resolve_path_parent(self.lc, self.item_scope, span, p);
+        match par {
+        PathParent::Module(item_scope) => {
+            let Some(v) = item_scope.values.get(c) else {
+                panic!("{span}: Unable to find component {c} of path {p:?}", p=p);
+            };
+            return v.clone();
+        },
+        PathParent::Enum(ap, is_data, variants) => {
+            let Some((idx, VariantInfo::Value)) = variants.get(c) else {
+                panic!("{span}: Unable to find component {c} of path {p:?}", p=p);
+            };
+            return match is_data {
+            true => ValueBinding::DataEnumVariant(ap.append(c.clone()), *idx),
+            false => ValueBinding::ValueEnumVariant(ap.append(c.clone()), *idx),
+            };
+        },
         }
-        todo!("{}Resolve value path {:?}", span, p);
     }
     fn visit_mut_pattern_value(&mut self, span: &crate::parser::lex::Span, v: &mut crate::ast::pattern::Value) {
         use crate::ast::pattern::{Value,NamedValue};
@@ -384,7 +440,7 @@ impl crate::ast::ExprVisitor for Context<'_> {
             println!("{INDENT}NamedValue: {:?} = {:?} @ {:p}", p, binding.as_ref().unwrap(), expr_p);
             },
         ExprKind::Struct(p, binding, _) => {
-            *binding = Some(resolve_path_type(self.item_scope, &expr.span, p));
+            *binding = Some(resolve_path_type(self.lc, self.item_scope, &expr.span, p));
             println!("{INDENT}Struct: {:?} = {:?} @ {:p}", p, binding.as_ref().unwrap(), expr_p);
             },
         ExprKind::Cast(_, ty) => self.resolve_type(ty),
@@ -431,10 +487,10 @@ impl crate::ast::ExprVisitor for Context<'_> {
     }
 }
 
-fn resolve_expr(item_scope: &ItemScope, expr: &mut crate::ast::ExprRoot, args: &mut [(crate::ast::Pattern, crate::ast::Type)])
+fn resolve_expr(lc: &LookupCache, item_scope: &ModuleIndex, expr: &mut crate::ast::ExprRoot, args: &mut [(crate::ast::Pattern, crate::ast::Type)])
 {
     let _i = INDENT.inc("resolve_expr");
-    let mut c = Context::new(item_scope);
+    let mut c = Context::new(lc, item_scope);
     // Reserve the non-destructured arguments (implicit first few locals)
     c.next_index = args.len() as _;
     if ! args.is_empty() {

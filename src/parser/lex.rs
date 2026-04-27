@@ -133,7 +133,7 @@ impl Lexer {
     pub fn check_rword(&self, exp: ReservedWord) -> super::Result<bool> {
         match self.cur {
         Some((_, Token::RWord(ref have),_)) if *have == exp => Ok(true),
-        None => todo!("EOF error"),
+        None => Ok(false),  // Checking at EOF is false
         Some(_) => Ok(false),
         }
     }
@@ -224,7 +224,10 @@ pub enum ReservedWord {
     Union,
     Enum,
     Extern,
+    /// `mod`: Define a module
     Mod,
+    /// `use`: Resolve-level alias
+    Use,
 
     Const,
     Mut,
