@@ -38,7 +38,7 @@ pub fn resolve(ast_crate: &mut crate::ast::Crate)
 
     resolve_mod(&lc, &mut ast_crate.module, AbsolutePath(Vec::new()));
 
-    //resolve_type_aliases();
+    resolve_type_aliases(ast_crate);
 }
 
 /// Fill the lookup cache for a module
@@ -59,9 +59,8 @@ fn fill_index(lc: &mut LookupCache, module: &crate::ast::items::Module, path: Ab
             mod_index.types.insert(name, TypeEnt::Module(p.clone()));
             fill_index(lc, module, p)
         },
-        ItemType::TypeAlias(ty) => {
+        ItemType::TypeAlias(_) => {
             let name = v.name.clone().unwrap();
-            //lc.type_aliases.insert(path.append(name.clone()), ty.clone());
             mod_index.types.insert(name.clone(), TypeBinding::Alias(path.append(name)).into());
         },
         
@@ -183,8 +182,98 @@ fn resolve_mod(lc: &LookupCache, module: &mut crate::ast::items::Module, path: A
         }
     }
 }
-fn resolve_type_aliases()
+
+/// Expand type aliases to the inner type
+fn resolve_type_aliases(ast_crate: &mut crate::ast::Crate)
 {
+    let mut s = State { aliases: Default::default() };
+    s.enum_from(&ast_crate.module, AbsolutePath(vec![]));
+    s.resolve_in(&mut ast_crate.module);
+
+    use crate::ast::items::ItemType;
+    struct State {
+        aliases: HashMap<AbsolutePath, crate::ast::Type>,
+    }
+    impl State {
+        fn enum_from(&mut self, module: &crate::ast::items::Module, mp: AbsolutePath) {
+            for v in &module.items {
+                match &v.ty {
+                ItemType::Module(m) => self.enum_from(m, mp.append(v.name.clone().unwrap())),
+                ItemType::TypeAlias(t) => {
+                    self.aliases.insert(mp.append(v.name.clone().unwrap()), t.clone());
+                },
+                _ => {},
+                }
+            }
+        }
+        fn resolve_in(&self, module: &mut crate::ast::items::Module) {
+            for v in &mut module.items {
+                match &mut v.ty {
+                ItemType::Module(m) => self.resolve_in(m),
+                ItemType::TypeAlias(t) => {
+                    self.resolve_in_ty(t);
+                },
+                _ => {},
+                }
+            }
+        }
+        fn resolve_in_ty(&self, ty: &mut crate::ast::Type) {
+            use crate::ast::ty::TypeKind;
+            match &mut ty.kind {
+            TypeKind::Infer { .. }
+            |TypeKind::Void
+            |TypeKind::Bool
+            |TypeKind::Integer(_) => {}
+            TypeKind::Tuple(items) => {
+                for ty in items {
+                    self.resolve_in_ty(ty);
+                }
+            },
+            TypeKind::Pointer { is_const: _, inner }
+            |TypeKind::UnsizedArray(inner) => self.resolve_in_ty(inner),
+            TypeKind::Named(type_path) => {
+                let crate::ast::ty::TypePath::Resolved(tb) = type_path else { panic!("Unresolved type") };
+                if let TypeBinding::Alias(absolute_path) = tb {
+                    *ty = self.aliases[absolute_path].clone();
+                    // TODO: Recursion limit
+                    self.resolve_in_ty(ty);
+                }
+            },
+            TypeKind::Array { inner, count } => {
+                self.resolve_in_ty(inner);
+                match count {
+                crate::ast::ty::ArraySize::Unevaluated(expr_root) => self.resolve_in_expr(expr_root),
+                crate::ast::ty::ArraySize::Known(_) => {},
+                }
+            },
+            TypeKind::TypeOf(expr_in_type) => {
+                self.resolve_in_expr(&mut expr_in_type.0);
+            },
+            }
+        }
+        fn resolve_in_expr(&self, expr_root: &mut crate::ast::ExprRoot) {
+            for ty in &mut expr_root.variables {
+                self.resolve_in_ty(ty);
+            }
+            crate::ast::visit_mut_expr(&mut &*self, &mut expr_root.e);
+        }
+    }
+    impl crate::ast::ExprVisitor for &'_ State {
+        fn visit_mut_expr(&mut self, expr: &mut crate::ast::expr::Expr) {
+            self.resolve_in_ty(&mut expr.data_ty);
+            use crate::ast::expr::ExprKind;
+            match &mut expr.kind {
+            ExprKind::TypeInfoSizeOf(ty)
+            |ExprKind::Cast(_, ty) => self.resolve_in_ty(ty),
+            _ => {},
+            }
+            crate::ast::visit_mut_expr(self, expr)
+        }
+    
+        fn visit_mut_block(&mut self, block: &mut crate::ast::expr::Block) {
+            crate::ast::visit_mut_block(self, block)
+        }
+    }
 }
 
 enum PathParent<'a> {
