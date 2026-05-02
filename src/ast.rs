@@ -21,6 +21,7 @@ pub struct Crate {
 }
 
 #[derive(Clone)]
+#[derive(serde::Deserialize,serde::Serialize)]
 pub struct StringLiteral(Vec<u8>);
 impl StringLiteral {
     pub fn from_bytes(v: Vec<u8>) -> Self {

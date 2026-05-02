@@ -31,9 +31,7 @@ fn expand_module(module: &mut super::ast::items::Module) {
             for v in &mut enm.variants {
                 match &mut v.ty {
                 crate::ast::items::EnumVariantTy::Bare => {},
-                crate::ast::items::EnumVariantTy::Value(expr_root) => {
-                    expand_expr(expr_root)
-                    },
+                crate::ast::items::EnumVariantTy::Value(expr_root) => expand_const_expr(expr_root),
                 crate::ast::items::EnumVariantTy::Data(_) => todo!(),
                 }
             }
@@ -45,16 +43,22 @@ fn expand_module(module: &mut super::ast::items::Module) {
             expand_expr(&mut function.code);
         },
         ItemType::Static(s) => {
-            expand_expr(&mut s.value);
+            expand_const_expr(&mut s.value);
         },
         ItemType::Constant(i) => {
-            expand_expr(&mut i.value);
+            expand_const_expr(&mut i.value);
         },
         }
     }
 }
 
-fn expand_expr(_root: &mut crate::ast::ExprRoot) {
+fn expand_const_expr(v: &mut crate::ast::items::ConstantValue) {
+    match v {
+    crate::ast::items::ConstantValue::Unknown(expr_root) => expand_expr(expr_root),
+    crate::ast::items::ConstantValue::Evaluated(items) => {},
+    }
+}
+fn expand_expr(_expr_root: &mut crate::ast::ExprRoot) {
 }
 
 fn check_attrs(attrs: &mut Vec<crate::ast::Attribute>) -> bool {

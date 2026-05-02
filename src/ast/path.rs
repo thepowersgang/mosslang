@@ -1,6 +1,7 @@
 
 #[derive(Debug,Clone)]
 #[derive(PartialOrd,Ord,PartialEq,Eq)]
+#[derive(serde::Deserialize,serde::Serialize)]
 pub struct Path
 {
     pub root: Root,
@@ -24,6 +25,7 @@ impl Path
 
 #[derive(Debug,Clone)]
 #[derive(PartialOrd,Ord,PartialEq,Eq)]
+#[derive(serde::Deserialize,serde::Serialize)]
 pub enum Root
 {
     /// No prefix to the path, same as `current`?
@@ -38,6 +40,7 @@ pub enum Root
 
 #[derive(Clone,Hash)]
 #[derive(PartialOrd,Ord,PartialEq,Eq)]
+#[derive(serde::Deserialize,serde::Serialize)]
 pub struct AbsolutePath(pub Vec<crate::Ident>);
 impl AbsolutePath {
     pub fn append(&self, v: crate::Ident) -> AbsolutePath {

@@ -185,7 +185,7 @@ pub fn parse_module(lex: &mut Lexer, mod_attrs: &mut Vec<crate::ast::Attribute>)
                 name: Some(name),
                 ty: ItemType::Static(crate::ast::items::Static {
                     ty,
-                    value: val,
+                    value: crate::ast::items::ConstantValue::Unknown(val),
                     }),
             });
             },
@@ -205,7 +205,7 @@ pub fn parse_module(lex: &mut Lexer, mod_attrs: &mut Vec<crate::ast::Attribute>)
                 name: Some(name),
                 ty: ItemType::Constant(crate::ast::items::Constant {
                     ty,
-                    value: val,
+                    value: crate::ast::items::ConstantValue::Unknown(val),
                     }),
             });
             },
@@ -259,7 +259,7 @@ fn parse_enum(lex: &mut Lexer, outer_attrs: &mut Vec<crate::ast::Attribute>) -> 
                 crate::ast::items::EnumVariantTy::Data(ty)
             }
             else if lex.opt_consume_punct(lex::Punct::Equals)? {
-                crate::ast::items::EnumVariantTy::Value( parse_root_expr(lex)? )
+                crate::ast::items::EnumVariantTy::Value( crate::ast::items::ConstantValue::Unknown(parse_root_expr(lex)?) )
             }
             else {
                 crate::ast::items::EnumVariantTy::Bare

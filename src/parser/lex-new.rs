@@ -79,6 +79,9 @@ impl Span
         //static NULL_PATH: ::std::sync::OnceLock<::std::rc::Rc<::std::path::Path>> = ::std::sync::OnceLock::new();
         Span { path: None, line: 0, ofs: 0, end_line: 0, end_ofs: 0 }
     }
+    pub fn new_extern() -> Self {
+        todo!()
+    }
     pub(super) fn new(start: PointSpan, end: PointSpan) -> Self {
         Span {
             path: Some(start.path),

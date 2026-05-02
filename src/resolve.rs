@@ -154,7 +154,7 @@ fn resolve_mod(lc: &LookupCache, module: &mut crate::ast::items::Module, path: A
                 match &mut v.ty {
                 crate::ast::items::EnumVariantTy::Bare => {},
                 crate::ast::items::EnumVariantTy::Value(expr_root) => {
-                    resolve_expr(lc, &item_scope, expr_root, &mut [])
+                    resolve_const_expr(lc, &item_scope, expr_root, &mut [])
                     },
                 crate::ast::items::EnumVariantTy::Data(_) => todo!(),
                 }
@@ -173,11 +173,11 @@ fn resolve_mod(lc: &LookupCache, module: &mut crate::ast::items::Module, path: A
         ItemType::Static(s) => {
             println!("{INDENT}resolve_mod: Static {}", v.name.as_ref().unwrap());
             cx.resolve_type(&mut s.ty);
-            resolve_expr(lc, &item_scope, &mut s.value, &mut []);
+            resolve_const_expr(lc, &item_scope, &mut s.value, &mut []);
         },
         ItemType::Constant(i) => {
             cx.resolve_type(&mut i.ty);
-            resolve_expr(lc, &item_scope, &mut i.value, &mut []);
+            resolve_const_expr(lc, &item_scope, &mut i.value, &mut []);
         },
         }
     }
@@ -573,6 +573,14 @@ impl crate::ast::ExprVisitor for Context<'_> {
         }
         crate::ast::visit_mut_block(self, block);
         self.layers.pop();
+    }
+}
+
+fn resolve_const_expr(lc: &LookupCache, item_scope: &ModuleIndex, expr: &mut crate::ast::items::ConstantValue, args: &mut [(crate::ast::Pattern, crate::ast::Type)])
+{
+    match expr {
+    crate::ast::items::ConstantValue::Unknown(expr_root) => resolve_expr(lc, item_scope, expr_root, args),
+    crate::ast::items::ConstantValue::Evaluated(items) => {},
     }
 }
 

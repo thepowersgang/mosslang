@@ -1,3 +1,4 @@
+//! Collection of small helper types
 
 pub mod iterable_trie;
 

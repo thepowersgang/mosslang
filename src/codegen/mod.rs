@@ -58,7 +58,11 @@ pub fn generate(output: &::std::path::Path, isa_name: &str, krate: crate::ast::C
                 }
             },
             ItemType::Constant(ref v) => {
-                state.inner.constants.insert(path.append(item.name.clone().unwrap()), &v.value);
+                let val = match &v.value {
+                    crate::ast::items::ConstantValue::Unknown(expr_root) => expr_root,
+                    crate::ast::items::ConstantValue::Evaluated(items) => todo!(),
+                };
+                state.inner.constants.insert(path.append(item.name.clone().unwrap()), val);
             },
             ItemType::Static(ref v) => {
                 state.inner.statics.insert(path.append(item.name.clone().unwrap()), &v.ty);
@@ -207,7 +211,11 @@ impl<'a> State<'a> {
     fn emit_static(&mut self, name: &super::Ident, s: &crate::ast::items::Static) {
         let _i = INDENT.inc("emit_static");
         println!("{INDENT}emit_static: {name}");
-        let ir = ir::Expr::from_ast(self, &s.value, &[]);
+        let val = match &s.value {
+            crate::ast::items::ConstantValue::Unknown(expr_root) => expr_root,
+            crate::ast::items::ConstantValue::Evaluated(items) => todo!(),
+        };
+        let ir = ir::Expr::from_ast(self, val, &[]);
         
         ir::dump_static(&mut self.ofp_bare_ir, name, &s.ty, &ir);
         

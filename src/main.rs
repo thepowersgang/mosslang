@@ -8,6 +8,7 @@ mod typecheck;
 mod resolve;
 mod codegen;
 mod helpers;
+mod metadata;
 
 #[derive(::gumdrop::Options)]
 struct Options
@@ -60,17 +61,50 @@ fn main() {
             p
             },
         };
+
+    enum CrateType {
+        Executable,
+        Library
+    }
+    let ty = match ast_crate.attributes.iter().find(|a| a.name == "crate_type")
+    {
+    None => {
+        if ast_crate.module.items.iter().any(|i| i.name.as_ref().map(|i| *i == "main").unwrap_or_default()) {
+            CrateType::Executable
+        }
+        else {
+            CrateType::Library
+        }
+    },
+    Some(a) => match &a.data
+        {
+        ast::AttributeData::Value(string_literal) => match string_literal.as_bytes()
+            {
+            b"executable" => CrateType::Executable,
+            b"lib" => CrateType::Library,
+            _ => todo!(),
+            },
+        _ => todo!(),
+        }
+    };
+    match ty {
+    CrateType::Executable => {},
+    CrateType::Library => {
+        // TODO: write metadata
+    }
+    }
+    
     match codegen::generate(&output_path, ISA_NAME, ast_crate) {
     Ok( () ) => {}
     Err(e) => todo!("Handle error from codegen: {:?}", e),
     }
 
-    //::std::env::set_var("OPT_LEVEL", "1");
-    //let c = cc::Build::new()
-    //    .object(output_path)
-    //    .get_compiler()
-    //    .to_command();
-    //eprintln!("{:?}", c);
+    match ty {
+    CrateType::Executable => {
+        // TODO: Link
+    },
+    CrateType::Library => {}
+    }
 }
 
 mod indent {

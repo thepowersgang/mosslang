@@ -8,6 +8,12 @@ pub struct ExprRoot
     /// Variable types, populated after typecheck
     pub variables: Vec<super::Type>,
 }
+impl ExprRoot
+{
+    pub fn new_extern() -> Self {
+        todo!();
+    }
+}
 
 pub struct Block
 {

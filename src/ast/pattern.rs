@@ -1,11 +1,14 @@
 #[derive(Debug)]
+#[derive(serde::Deserialize,serde::Serialize)]
 pub struct Pattern {
+    #[serde(skip,default="crate::Span::new_extern")]
     pub span: crate::Span,
     pub bindings: Vec<PatternBinding>,
     pub ty: PatternTy,
     /// Used by type inference to store a type
     pub data_ty: super::Type,
 }
+#[derive(serde::Deserialize,serde::Serialize)]
 pub struct PatternBinding {
     pub name: crate::Ident,
     pub index: Option<u32>,
@@ -21,6 +24,7 @@ impl ::std::fmt::Debug for PatternBinding {
     }
 }
 #[derive(Debug)]
+#[derive(serde::Deserialize,serde::Serialize)]
 pub enum PatternTy {
     Any,
     Multiple(Vec<Pattern>),
@@ -32,12 +36,14 @@ pub enum PatternTy {
 }
 
 #[derive(Debug)]
+#[derive(serde::Deserialize,serde::Serialize)]
 pub enum Value {
     Integer(u128),
     NamedValue(NamedValue),
 }
 
 #[derive(Debug)]
+#[derive(serde::Deserialize,serde::Serialize)]
 pub enum NamedValue {
     Unbound(super::Path),
     Constant(super::path::AbsolutePath),

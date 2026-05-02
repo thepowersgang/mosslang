@@ -123,7 +123,7 @@ fn typecheck_mod(lc: &LookupContext, module: &mut crate::ast::items::Module)
                 match &mut v.ty {
                 crate::ast::items::EnumVariantTy::Bare => {},
                 crate::ast::items::EnumVariantTy::Value(expr_root) => {
-                    typecheck_expr(lc, &ty, expr_root, &mut [])
+                    typecheck_const_expr(lc, &ty, expr_root, &mut [])
                     },
                 crate::ast::items::EnumVariantTy::Data(_) => {},
                 }
@@ -137,13 +137,21 @@ fn typecheck_mod(lc: &LookupContext, module: &mut crate::ast::items::Module)
         },
         ItemType::Static(i) => {
             println!("{INDENT}typecheck_mod: Static {}", v.name.as_ref().unwrap());
-            typecheck_expr(lc, &i.ty, &mut i.value, &mut []);
+            typecheck_const_expr(lc, &i.ty, &mut i.value, &mut []);
         },
         ItemType::Constant(i) => {
             println!("{INDENT}typecheck_mod: Constant {}", v.name.as_ref().unwrap());
-            typecheck_expr(lc, &i.ty, &mut i.value, &mut []);
+            typecheck_const_expr(lc, &i.ty, &mut i.value, &mut []);
         },
         }
+    }
+}
+
+fn typecheck_const_expr(lc: &LookupContext, ret_ty: &crate::ast::Type, expr: &mut crate::ast::items::ConstantValue, args: &mut [(crate::ast::Pattern, crate::ast::Type)])
+{
+    match expr {
+    crate::ast::items::ConstantValue::Unknown(expr_root) => typecheck_expr(lc, ret_ty, expr_root, args),
+    crate::ast::items::ConstantValue::Evaluated(items) => {},
     }
 }
 

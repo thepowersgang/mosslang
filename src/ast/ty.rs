@@ -1,6 +1,10 @@
+//!
+
 #[derive(Clone)]
+#[derive(serde::Deserialize,serde::Serialize)]
 pub struct Type
 {
+    #[serde(skip,default="crate::Span::new_extern")]
     pub span: crate::Span,
     pub kind: TypeKind,
 }
@@ -201,6 +205,7 @@ impl ::core::fmt::Display for Type {
 
 #[derive(Copy,Clone,Debug)]
 #[derive(PartialOrd,Ord,PartialEq,Eq)]
+#[derive(serde::Deserialize,serde::Serialize)]
 pub enum IntClass {
     /// rust's usize
     PtrInt,
@@ -285,6 +290,7 @@ impl Ord for ExprInType {
 
 #[derive(Clone,Debug)]
 #[derive(PartialOrd,Ord,PartialEq,Eq)]
+#[derive(serde::Deserialize,serde::Serialize)]
 pub enum TypeKind
 {
     /// An omitted type
