@@ -4,8 +4,8 @@ use parser::lex::{Ident,Span};
 mod ast;
 mod parser;
 mod expand;
-mod typecheck;
 mod resolve;
+mod typecheck;
 mod codegen;
 mod helpers;
 mod metadata;
@@ -47,6 +47,9 @@ fn main() {
     //let hir_crate = hir::from_ast(ast_crate);
     // 4. Typecheck and populate
     typecheck::typecheck(&mut ast_crate);
+
+    codegen::const_eval(&mut ast_crate);
+
     // 5. Generate output
     let output_path = match args.output {
         Some(p) => p,

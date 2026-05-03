@@ -161,10 +161,11 @@ pub struct FunctionSignature
 
 pub enum ConstantValue {
     Unknown(crate::ast::ExprRoot),
-    Evaluated(Vec<u8>),
+    Evaluated(EvaluatedConstant),
 }
 impl ConstantValue {
     fn external() -> Self {
-        Self::Evaluated(vec![])
+        Self::Evaluated(EvaluatedConstant(vec![]))
     }
 }
+pub struct EvaluatedConstant(pub Vec<u8>);

@@ -8,6 +8,8 @@ use ::std::collections::HashMap;
 
 mod type_info;
 mod ir;
+mod const_eval;
+pub use self::const_eval::const_eval;
 
 #[cfg(feature="cranelift")]
 mod backend_cranelift;
