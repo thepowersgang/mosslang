@@ -420,7 +420,7 @@ impl<'a> Context<'a> {
 
     fn resolve_path_value(&self, span: &crate::parser::lex::Span, p: &mut crate::ast::Path) -> ValueBinding {
         // Handle variables first
-        if let crate::ast::path::Root::Current = p.root {
+        if let crate::ast::path::Root::None = p.root {
             if p.components.len() == 1 {
                 let c = p.components.first().expect("Empty path?");
                 for layer in self.layers.iter().rev() {
