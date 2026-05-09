@@ -17,30 +17,70 @@ fn handle_module(module: &mut crate::ast::items::Module) {
         ItemType::Use(_) => {},
         ItemType::ExternBlock(eb) => {
         },
-        ItemType::TypeAlias(_) => {},
+        ItemType::TypeAlias(ty) => {
+            handle_type(ty)
+        },
         ItemType::Struct(str) => {
+            for f in &mut str.fields {
+                handle_type(&mut f.ty)
+            }
         },
         ItemType::Enum(enm) => {
             for v in &mut enm.variants {
                 match &mut v.ty {
                 crate::ast::items::EnumVariantTy::Bare => {},
                 crate::ast::items::EnumVariantTy::Value(expr_root) => handle_cv(expr_root),
-                crate::ast::items::EnumVariantTy::Data(_) => {},
+                crate::ast::items::EnumVariantTy::Data(ty) => handle_type(ty),
                 }
             }
         },
         ItemType::Union(u) => {
+            for f in &mut u.variants {
+                handle_type(&mut f.ty)
+            }
         },
         ItemType::Function(function) => {
             handle_expr(&mut function.code);
         },
         ItemType::Static(s) => {
+            handle_type(&mut s.ty);
             handle_cv(&mut s.value);
         },
         ItemType::Constant(i) => {
+            handle_type(&mut i.ty);
             handle_cv(&mut i.value);
         },
         }
+    }
+}
+
+fn handle_type(ty: &mut crate::ast::Type) {
+    use crate::ast::ty::TypeKind;
+    match &mut ty.kind {
+    TypeKind::Infer { .. } => {},
+    TypeKind::Void => {},
+    TypeKind::Bool => {},
+    TypeKind::Integer(_) => {},
+    TypeKind::Tuple(items) => {
+        for ty in items {
+            handle_type(ty);
+        }
+    },
+    TypeKind::Named(_) => {},
+    TypeKind::Pointer { is_const: _, inner } => handle_type(inner),
+    TypeKind::Array { inner, count } => {
+        handle_type(inner);
+        match count {
+        crate::ast::ty::ArraySize::Unevaluated(expr_root) => {
+            handle_expr(expr_root);
+            let v = evaluate(expr_root);
+            todo!();
+        },
+        crate::ast::ty::ArraySize::Known(_) => todo!(),
+        }
+    },
+    TypeKind::UnsizedArray(inner) => handle_type(inner),
+    TypeKind::TypeOf(_) => {},
     }
 }
 
@@ -63,14 +103,14 @@ fn evaluate(expr_root: &crate::ast::ExprRoot) -> EvaluatedConstant {
     return match state.eval_node(&expr_root.e) {
         Ok(v) => v,
         Err(e) => match e {
-            BreakTarget::Continue|BreakTarget::Break => panic!("break/continue from non-loop"),
+            BreakTarget::Continue|BreakTarget::Break(_) => panic!("break/continue from non-loop"),
             BreakTarget::Return(evaluated_value) => evaluated_value,
             }
         };
 
     enum BreakTarget {
         Continue,
-        Break,
+        Break(EvaluatedConstant),
         Return(EvaluatedConstant),
     }
     struct State {
@@ -113,21 +153,22 @@ fn evaluate(expr_root: &crate::ast::ExprRoot) -> EvaluatedConstant {
                 }
             }
         }
+        fn eval_block(&mut self, block: &crate::ast::expr::Block) -> Result<EvaluatedConstant,BreakTarget> {
+            for s in &block.statements {
+                match s {
+                crate::ast::expr::Statement::Expr(expr) => { let _ = self.eval_node(expr)?; },
+                crate::ast::expr::Statement::Let(pattern, _, expr) => todo!(),
+                }
+            }
+            match &block.result {
+            Some(node) => self.eval_node(node),
+            None => Ok(EvaluatedConstant(Vec::new())),
+            }
+        }
         fn eval_node(&mut self, expr: &crate::ast::expr::Expr) -> Result<EvaluatedConstant,BreakTarget> {
             use crate::ast::expr::ExprKind;
             Ok(match &expr.kind {
-            ExprKind::Block(block) => {
-                for s in &block.statements {
-                    match s {
-                    crate::ast::expr::Statement::Expr(expr) => { let _ = self.eval_node(expr)?; },
-                    crate::ast::expr::Statement::Let(pattern, _, expr) => todo!(),
-                    }
-                }
-                match &block.result {
-                Some(node) => self.eval_node(node)?,
-                None => EvaluatedConstant(Vec::new()),
-                }
-            },
+            ExprKind::Block(block) => self.eval_block(block)?,
             ExprKind::LiteralString(string_literal) => todo!(),
             ExprKind::LiteralInteger(v, int_lit_class) => {
                 let mut rv = self.alloc(&expr.data_ty);
@@ -153,9 +194,17 @@ fn evaluate(expr_root: &crate::ast::ExprRoot) -> EvaluatedConstant {
                 rv
             },
             ExprKind::TypeInfoSizeOf(_) => todo!(),
-            ExprKind::Return(expr) => todo!(),
-            ExprKind::Continue => todo!(),
-            ExprKind::Break(expr) => todo!(),
+            ExprKind::Return(expr) => return Err(BreakTarget::Return(match expr
+                {
+                Some(expr) => self.eval_node(expr)?,
+                None => EvaluatedConstant(Vec::new()),
+                })),
+            ExprKind::Continue => return Err(BreakTarget::Continue),
+            ExprKind::Break(expr) => return Err(BreakTarget::Break(match expr
+                {
+                Some(expr) => self.eval_node(expr)?,
+                None => EvaluatedConstant(Vec::new()),
+                })),
             ExprKind::Assign { slot, op, value } => todo!(),
             ExprKind::NamedValue(path, value_binding) => todo!(),
             ExprKind::CallPath(path, value_binding, exprs) => todo!(),
@@ -188,7 +237,17 @@ fn evaluate(expr_root: &crate::ast::ExprRoot) -> EvaluatedConstant {
             },
             ExprKind::BinOp(bin_op_ty, expr, expr1) => todo!(),
             ExprKind::CallValue(expr, exprs) => todo!(),
-            ExprKind::Loop { body } => todo!(),
+            ExprKind::Loop { body } => {
+                loop {
+                    match self.eval_block(body)
+                    {
+                    Ok(_) => {},
+                    Err(BreakTarget::Break(v)) => return Ok(v),
+                    Err(BreakTarget::Continue) => continue,
+                    Err(BreakTarget::Return(v)) => return Err(BreakTarget::Break(v)),
+                    }
+                }
+            },
             ExprKind::WhileLoop { cond, body, else_block } => todo!(),
             ExprKind::ForLoop { pattern, start, end, body, else_block } => todo!(),
             ExprKind::IfChain { branches, else_block } => todo!(),
