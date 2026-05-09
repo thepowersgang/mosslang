@@ -93,7 +93,11 @@ fn main() {
     match ty {
     CrateType::Executable => {},
     CrateType::Library => {
-        // TODO: write metadata
+        let path = output_path.with_extension("moss-meta");
+        match metadata::save_crate(&path, &ast_crate) {
+        Ok( () ) => {}
+        Err(e) => todo!("Handle error from metadata write: {:?}", e),
+        }
     }
     }
     

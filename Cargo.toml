@@ -33,6 +33,7 @@ strum = { version = "0.24.1", features = [ "std", "derive" ] }
 utf8reader = "0.1.0"
 
 serde = { version = "1.0.228", features = ["derive"] }
+bson = { version = "3.0.0", features = ["serde"] }
 
 # Cranelift codegen backend
 cranelift-frontend = { version = "0.118", optional = true }

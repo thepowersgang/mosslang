@@ -80,6 +80,7 @@ pub enum ValueBinding
 }
 #[derive(Clone, Debug)]
 #[derive(PartialOrd,Ord,PartialEq,Eq)]
+#[derive(serde::Serialize,serde::Deserialize)]
 pub enum TypeBinding
 {
     Alias(AbsolutePath),
