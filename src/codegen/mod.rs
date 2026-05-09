@@ -85,8 +85,8 @@ pub fn generate(output: &::std::path::Path, isa_name: &str, krate: crate::ast::C
             }
         }
     }
-    enum_module(&mut state, &krate.module, AbsolutePath(Vec::new()));
-    state.visit_module(&krate.module);
+    enum_module(&mut state, &krate.module, AbsolutePath::new_current());
+    state.visit_module(AbsolutePath::new_current(), &krate.module);
     state.out.finalise()?;
     Ok( () )
 }
@@ -171,11 +171,12 @@ impl<'a> State<'a> {
     fn type_info(&self, ty: &crate::ast::Type) -> type_info::TypeInfoRef {
         self.inner.type_info(ty)
     }
-    fn visit_module(&mut self, module: &crate::ast::items::Module) {
+    fn visit_module(&mut self, path: AbsolutePath, module: &crate::ast::items::Module) {
         for item in &module.items {
             use crate::ast::items::ItemType;
             match &item.ty {
             | ItemType::Use(_)
+            | ItemType::ExternCrate(_)
             | ItemType::ExternBlock(_)
             | ItemType::TypeAlias(_)
             | ItemType::Struct(_)
@@ -184,47 +185,46 @@ impl<'a> State<'a> {
             | ItemType::Constant(_)
                 => {},
                 
-            ItemType::Module(module) => self.visit_module(module),
+            ItemType::Module(module) => self.visit_module(path.append(item.name.as_ref().unwrap().clone()), module),
 
-            ItemType::Function(fcn) => self.emit_function(item.name.as_ref().unwrap(), fcn),
-            ItemType::Static(s) => self.emit_static(item.name.as_ref().unwrap(), s),
+            ItemType::Function(fcn) => self.emit_function(path.append(item.name.as_ref().unwrap().clone()), fcn),
+            ItemType::Static(s) => self.emit_static(path.append(item.name.as_ref().unwrap().clone()), s),
             }
         }
     }
 
-    fn emit_function(&mut self, name: &super::Ident, f: &crate::ast::items::Function) {
+    fn emit_function(&mut self, path: AbsolutePath, f: &crate::ast::items::Function) {
         let _i = INDENT.inc("emit_function");
-        println!("{INDENT}emit_function: {name}");
+        println!("{INDENT}emit_function: {path}");
         let ir = ir::Expr::from_ast(self, &f.code, &f.sig.args);
 
-        ir::dump_fcn(&mut self.ofp_bare_ir, name, &f.sig, &ir);
+        ir::dump_fcn(&mut self.ofp_bare_ir, &path, &f.sig, &ir);
         ir::verify::check(&ir, f.sig.args.len());
 
         let ssa_ir = {
-            println!("{INDENT}emit_function: SSA {name}");
+            println!("{INDENT}emit_function: SSA {path}");
             ir::SsaExpr::new(ir)
         };
-        ir::dump_fcn(&mut self.ofp_ssa_ir, name, &f.sig, ssa_ir.get());
+        ir::dump_fcn(&mut self.ofp_ssa_ir, &path, &f.sig, ssa_ir.get());
         ir::verify::check_ssa(ssa_ir.get(), f.sig.args.len());
 
-        let p = crate::ast::path::AbsolutePath(vec![name.clone()]);
-        self.out.lower_function(&self.inner, &p, &ssa_ir);
+        self.out.lower_function(&self.inner, &path, &ssa_ir);
     }
-    fn emit_static(&mut self, name: &super::Ident, s: &crate::ast::items::Static) {
+    fn emit_static(&mut self, path: AbsolutePath, s: &crate::ast::items::Static) {
         let _i = INDENT.inc("emit_static");
-        println!("{INDENT}emit_static: {name}");
+        println!("{INDENT}emit_static: {path}");
         let val = match &s.value {
             crate::ast::items::ConstantValue::Unknown(expr_root) => expr_root,
             crate::ast::items::ConstantValue::Evaluated(items) => todo!(),
         };
         let ir = ir::Expr::from_ast(self, val, &[]);
         
-        ir::dump_static(&mut self.ofp_bare_ir, name, &s.ty, &ir);
+        ir::dump_static(&mut self.ofp_bare_ir, &path, &s.ty, &ir);
         
         let ssa_ir = {
-            println!("{INDENT}emit_static: SSA {name}");
+            println!("{INDENT}emit_static: SSA {path}");
             ir::SsaExpr::new(ir)
         };
-        ir::dump_static(&mut self.ofp_ssa_ir, name, &s.ty, ssa_ir.get());
+        ir::dump_static(&mut self.ofp_ssa_ir, &path, &s.ty, ssa_ir.get());
     }
 }

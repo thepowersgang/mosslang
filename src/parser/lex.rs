@@ -251,6 +251,7 @@ pub enum ReservedWord {
     #[strum(to_string="self")]
     Self_,
     Super,
+    Crate,
 
     Sizeof,
     Typeof,

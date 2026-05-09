@@ -1247,16 +1247,16 @@ fn is_type_complex(t: &crate::ast::Type) -> bool {
 }
 fn mangle_path(path: &AbsolutePath) -> String {
     // HACK: Only mangle if multiple entries
-    if path.0.len() != 1 {
+    if path.1.len() != 1 {
         use std::fmt::Write;
         let mut rv = String::new();
         let _ = write!(&mut rv, "_ZM");
-        for v in &path.0 {
+        for v in &path.1 {
             let _ = write!(&mut rv, "{}{}", v.len(), v);
         }
         rv
     }
     else {
-        path.0[0].to_string()
+        path.1[0].to_string()
     }
 }

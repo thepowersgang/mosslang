@@ -127,7 +127,7 @@ impl RuleEnumerate<'_, '_> {
                 NamedValue::Unbound(_) => panic!("Unresolved path in pattern"),
                 NamedValue::EnumVariant(absolute_path, _) => {
                     // TODO: If this is a data variant, then it should be a function pointer
-                    let ap = AbsolutePath(absolute_path.0[..absolute_path.0.len()-1].to_owned());
+                    let ap = absolute_path.parent();
                     tmp_ty = Type::new_path_resolved(span.clone(), crate::ast::path::TypeBinding::ValueEnum(ap));
                     &tmp_ty
                     },

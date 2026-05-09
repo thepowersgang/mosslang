@@ -23,7 +23,7 @@ pub fn typecheck(ast_crate: &mut crate::ast::Crate)
     println!("typecheck");
 
     let mut lc = LookupContext::default();
-    enumerate_mod(&mut lc, &ast_crate.module, &AbsolutePath(Vec::new()));
+    enumerate_mod(&mut lc, &ast_crate.module, &AbsolutePath::new_current());
 
     typecheck_mod(&lc, &mut ast_crate.module)
 }
@@ -34,6 +34,7 @@ fn enumerate_mod(lc: &mut LookupContext, module: &crate::ast::items::Module, pat
         match &v.ty {
         ItemType::Module(module) => enumerate_mod(lc, module, &path.append(v.name.clone().expect("Unnamed module"))),
         ItemType::Use(_) => {},
+        ItemType::ExternCrate(_) => {},
         ItemType::ExternBlock(eb) => {
             for i in &eb.items {
                 use crate::ast::items::ExternItemType;
@@ -111,6 +112,7 @@ fn typecheck_mod(lc: &LookupContext, module: &mut crate::ast::items::Module)
         match &mut v.ty {
         ItemType::Module(module) => typecheck_mod(lc, module),
         ItemType::Use(_) => {},
+        ItemType::ExternCrate(_) => {},
         ItemType::ExternBlock(_eb) => {
         },
         ItemType::TypeAlias(_ty) => {

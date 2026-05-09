@@ -34,9 +34,9 @@ pub fn resolve(ast_crate: &mut crate::ast::Crate)
     println!("resolve");
 
     let mut lc = LookupCache::default();
-    fill_index(&mut lc, &ast_crate.module, AbsolutePath(Vec::new()));
+    fill_index(&mut lc, &ast_crate.module, AbsolutePath::new_current());
 
-    resolve_mod(&lc, &mut ast_crate.module, AbsolutePath(Vec::new()));
+    resolve_mod(&lc, &mut ast_crate.module, AbsolutePath::new_current());
 
     resolve_type_aliases(ast_crate);
 }
@@ -53,6 +53,11 @@ fn fill_index(lc: &mut LookupCache, module: &crate::ast::items::Module, path: Ab
         use crate::ast::items::ItemType;
         match &v.ty {
         ItemType::Use(_) => todo!("Handle `use`"),
+        ItemType::ExternCrate(lib_name) => {
+            let name = v.name.clone().unwrap();
+            let p = AbsolutePath::new_extern(lib_name.clone());
+            mod_index.types.insert(name, TypeEnt::Module(p.clone()));
+        }
         ItemType::Module(module) => {
             let name = v.name.clone().unwrap();
             let p = path.append(name.clone());
@@ -126,6 +131,7 @@ fn resolve_mod(lc: &LookupCache, module: &mut crate::ast::items::Module, path: A
         match &mut v.ty {
         ItemType::Module(module) => resolve_mod(lc, module, path.append(v.name.clone().unwrap())),
         ItemType::Use(_) => {},
+        ItemType::ExternCrate(_) => {},
         ItemType::ExternBlock(eb) => {
             for v in &mut eb.items {
                 match &mut v.ty {
@@ -187,7 +193,7 @@ fn resolve_mod(lc: &LookupCache, module: &mut crate::ast::items::Module, path: A
 fn resolve_type_aliases(ast_crate: &mut crate::ast::Crate)
 {
     let mut s = State { aliases: Default::default() };
-    s.enum_from(&ast_crate.module, AbsolutePath(vec![]));
+    s.enum_from(&ast_crate.module, AbsolutePath::new_current());
     s.resolve_in(&mut ast_crate.module);
 
     use crate::ast::items::ItemType;
@@ -289,14 +295,10 @@ fn resolve_path_parent<'lc, 'p>(lc: &'lc LookupCache, item_scope: &'lc ModuleInd
             item_scope
         },
         Root::Super(extra_count) => {
-            let mut path = item_scope.path.clone();
-            path.0.pop().expect("");
-            for _ in 0 .. extra_count {
-                path.0.pop().expect("");
-            }
+            let path = item_scope.path.parent_n(extra_count);
             lc.modules.get(&path).unwrap()
         },
-        Root::Root => lc.modules.get(&AbsolutePath(Vec::new())).unwrap(),
+        Root::Root => lc.modules.get(&AbsolutePath::new_current()).unwrap(),
         };
     assert!(p.components.len() > 0);
     let c = p.components.last().expect("Empty path?");
@@ -307,7 +309,10 @@ fn resolve_path_parent<'lc, 'p>(lc: &'lc LookupCache, item_scope: &'lc ModuleInd
             panic!("{span}: Unable to find component {n} of path {p:?}", span=span)
         };
         match t {
-        TypeEnt::Module(absolute_path) => item_scope = lc.modules.get(absolute_path).expect("Module has no index"),
+        TypeEnt::Module(absolute_path) => {
+            let Some(is) = lc.modules.get(absolute_path) else { panic!("Module {} has no index", absolute_path); };
+            item_scope = is;
+        },
         TypeEnt::Enum(ap, is_data, variants) => {
             if i != p.components.len() - 2 {
                 panic!("{span}: Getting child item of invalid type (enum variant)", span=span);

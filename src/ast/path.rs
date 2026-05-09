@@ -41,14 +41,24 @@ pub enum Root
 #[derive(Clone,Hash)]
 #[derive(PartialOrd,Ord,PartialEq,Eq)]
 #[derive(serde::Deserialize,serde::Serialize)]
-pub struct AbsolutePath(pub Vec<crate::Ident>);
+pub struct AbsolutePath(Option<crate::Ident>, pub Vec<crate::Ident>);
 impl AbsolutePath {
+    pub fn new_current() -> Self {
+        AbsolutePath(None, Default::default())
+    }
+    pub fn new_extern(name: crate::Ident) -> Self {
+        AbsolutePath(Some(name),Default::default())
+    }
     pub fn append(&self, v: crate::Ident) -> AbsolutePath {
-        AbsolutePath(self.0.iter().cloned().chain(::std::iter::once(v)).collect())
+        AbsolutePath(self.0.clone(), self.1.iter().cloned().chain(::std::iter::once(v)).collect())
     }
     pub fn parent(&self) -> AbsolutePath {
-        assert!(self.0.len() > 1);  // NOTE: Empty AbsolutePath isn't really valid, so only allow with two more more entries
-        AbsolutePath(self.0[..self.0.len()-1].to_owned())
+        assert!(self.1.len() > 0);
+        AbsolutePath(self.0.clone(), self.1[..self.1.len()-1].to_owned())
+    }
+    pub fn parent_n(&self, extra_count: usize) -> Self {
+        assert!(self.1.len() > extra_count);
+        AbsolutePath(self.0.clone(), self.1[..self.1.len()-1-extra_count].to_owned())
     }
 }
 impl ::core::fmt::Debug for AbsolutePath {
@@ -58,7 +68,13 @@ impl ::core::fmt::Debug for AbsolutePath {
 }
 impl ::core::fmt::Display for AbsolutePath {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for c in &self.0 {
+        if let Some(n) = &self.0 {
+            write!(f, "::{}", n)?;
+        }
+        else {
+            f.write_str("crate")?;
+        }
+        for c in &self.1 {
             write!(f, "::{}", c)?;
         }
         Ok(())

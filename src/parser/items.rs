@@ -158,6 +158,7 @@ pub fn parse_module(lex: &mut Lexer, mod_attrs: &mut Vec<crate::ast::Attribute>)
                     attributes,
                 });
                 },
+            // Function with specified ABI
             lex::Token::RWord(lex::ReservedWord::Fn) => {
                 println!("extern fn");
                 let (name, i) = parse_fn(lex, &mut attributes, abi)?;
@@ -167,6 +168,22 @@ pub fn parse_module(lex: &mut Lexer, mod_attrs: &mut Vec<crate::ast::Attribute>)
                     attributes,
                 });
                 },
+            // Library
+            lex::Token::RWord(lex::ReservedWord::Crate) => {
+                let lib_name = lex.consume_ident()?;
+                let as_name = if lex.opt_consume_rword(lex::ReservedWord::As)? {
+                        lex.consume_ident()?
+                    }
+                    else {
+                        lib_name.clone()
+                    };
+                lex.consume_punct(lex::Punct::Semicolon)?;
+                rv.items.push(crate::ast::items::Item {
+                    name: Some(as_name),
+                    ty: crate::ast::items::ItemType::ExternCrate(lib_name),
+                    attributes,
+                });
+                }
             t => todo!("{}: other extern? {:?}", lex.start_span(), t),
             }
         },

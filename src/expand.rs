@@ -19,6 +19,7 @@ fn expand_module(module: &mut super::ast::items::Module) {
         match &mut v.ty {
         ItemType::Module(module) => expand_module(module),
         ItemType::Use(_) => {},
+        ItemType::ExternCrate(_) => {},
         ItemType::ExternBlock(eb) => {
             eb.items.retain_mut(|v| check_attrs(&mut v.attributes));
         },

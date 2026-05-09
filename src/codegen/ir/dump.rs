@@ -1,10 +1,11 @@
 
+use crate::ast::path::AbsolutePath;
 use super::{Terminator,Operation,Value};
 
 
-pub fn dump_fcn(out: &mut dyn ::std::io::Write, name: &crate::Ident, sig: &crate::ast::items::FunctionSignature, ir: &super::Expr)
+pub fn dump_fcn(out: &mut dyn ::std::io::Write, path: &AbsolutePath, sig: &crate::ast::items::FunctionSignature, ir: &super::Expr)
 {
-    write!(out, "fn {name}( ").unwrap();
+    write!(out, "fn {path}( ").unwrap();
     for (i,(_, ty)) in sig.args.iter().enumerate() {
         write!(out, "_{}: {}, ", i, ty).unwrap();
     }
@@ -13,9 +14,9 @@ pub fn dump_fcn(out: &mut dyn ::std::io::Write, name: &crate::Ident, sig: &crate
     write!(out, "}}\n\n").unwrap();
 }
 
-pub fn dump_static(out: &mut dyn ::std::io::Write, name: &crate::Ident, ty: &crate::ast::Type, ir: &super::Expr)
+pub fn dump_static(out: &mut dyn ::std::io::Write, path: &AbsolutePath, ty: &crate::ast::Type, ir: &super::Expr)
 {
-    write!(out, "static {name}: {ty} = {{\n").unwrap();
+    write!(out, "static {path}: {ty} = {{\n").unwrap();
     dump(&mut IndentFile(&mut *out, true), &ir).unwrap();
     write!(out, "}};\n\n").unwrap();
 }

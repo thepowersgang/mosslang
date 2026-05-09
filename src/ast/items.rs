@@ -24,6 +24,7 @@ pub enum ItemType
     Module(Module),
     Use(Use),
 
+    ExternCrate(Ident), // TODO: Have another reference counted string?
     ExternBlock(ExternBlock),
 
     TypeAlias(crate::ast::Type),

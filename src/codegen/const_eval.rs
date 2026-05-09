@@ -15,6 +15,7 @@ fn handle_module(module: &mut crate::ast::items::Module) {
         match &mut v.ty {
         ItemType::Module(module) => handle_module(module),
         ItemType::Use(_) => {},
+        ItemType::ExternCrate(_) => {},
         ItemType::ExternBlock(eb) => {
         },
         ItemType::TypeAlias(ty) => {
