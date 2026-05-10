@@ -23,7 +23,7 @@ struct State<'a> {
 }
 #[derive(Default)]
 struct InnerState<'a> {
-    constants: HashMap<AbsolutePath,&'a crate::ast::ExprRoot>,
+    constants: HashMap<AbsolutePath,&'a crate::ast::items::EvaluatedConstant>,
     statics: HashMap<AbsolutePath,&'a crate::ast::Type>,
     fields: HashMap<AbsolutePath,HashMap<crate::Ident, (usize, &'a crate::ast::Type)>>,
     field_types: HashMap<AbsolutePath,Vec<&'a crate::ast::Type>>,
@@ -62,8 +62,8 @@ pub fn generate(output: &::std::path::Path, isa_name: &str, krate: crate::ast::C
             },
             ItemType::Constant(ref v) => {
                 let val = match &v.value {
-                    crate::ast::items::ConstantValue::Unknown(expr_root) => expr_root,
-                    crate::ast::items::ConstantValue::Evaluated(items) => todo!("Evaluated constant"),
+                    crate::ast::items::ConstantValue::Unknown(_) => panic!("Unevaluated constant seen"),
+                    crate::ast::items::ConstantValue::Evaluated(ec) => ec,
                 };
                 state.inner.constants.insert(path.append(item.name.clone().unwrap()), val);
             },

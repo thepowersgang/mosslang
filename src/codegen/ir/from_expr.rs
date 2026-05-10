@@ -171,7 +171,8 @@ impl<'a,'b> Visitor<'a,'b> {
             ValueBinding::Local(i) => Value::Local(super::LocalIndex(*i as _), Default::default()),
             ValueBinding::Static(ap) => Value::Named(ap.clone(), Default::default()),
             ValueBinding::Constant(absolute_path) => {
-                self.visit_expr( &self.parent.inner.constants.get(absolute_path).expect("Missing constant?").e )
+                let ec = self.parent.inner.constants.get(absolute_path).expect("Missing constant?");
+                todo!("Expand constant: {:?}", ec);
             },
             ValueBinding::ValueEnumVariant(_absolute_path, idx) => {
                 // HACK: Assume that the variant isn't a data-holding variant
@@ -698,7 +699,10 @@ impl<'a,'b> Visitor<'a,'b> {
         },
         PatternValue::NamedValue(NamedValue::Unbound(_)) => unreachable!("{}: Unresolved pattern value encountered", span),
         PatternValue::NamedValue(NamedValue::EnumVariant(..)) => panic!("{}: Unexpected enum variant?", span),
-        PatternValue::NamedValue(NamedValue::Constant(absolute_path)) => self.visit_expr( &self.parent.inner.constants.get(absolute_path).expect("Missing constant?").e ),
+        PatternValue::NamedValue(NamedValue::Constant(absolute_path)) => {
+            let ec = self.parent.inner.constants.get(absolute_path).expect("Missing constant?");
+            todo!("PatternValue from evaluated constant: {:?}", ec)
+        },
         }
     }
     fn match_pattern_range(&mut self, _: &crate::parser::lex::Span, value: super::Value, left: super::Value, right: super::Value, incl: bool, bb_true: super::BlockIndex, bb_false: super::BlockIndex) {

@@ -169,4 +169,5 @@ impl ConstantValue {
         Self::Evaluated(EvaluatedConstant(vec![]))
     }
 }
+#[derive(Debug)]
 pub struct EvaluatedConstant(pub Vec<u8>);
