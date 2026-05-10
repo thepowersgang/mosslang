@@ -14,10 +14,12 @@ struct ModuleIndex {
     types: HashMap<crate::Ident, TypeEnt>,
     values: HashMap<crate::Ident, ValueBinding>,
 }
+#[derive(Debug)]
 enum VariantInfo {
     Value,
     Type,
 }
+#[derive(Debug)]
 enum TypeEnt {
     Module(AbsolutePath),
     Enum(AbsolutePath, bool, HashMap<crate::Ident, (usize, VariantInfo,)>),
@@ -35,6 +37,9 @@ pub fn resolve(ast_crate: &mut crate::ast::Crate)
 
     let mut lc = LookupCache::default();
     fill_index(&mut lc, &ast_crate.module, AbsolutePath::new_current());
+    for (name, m) in &ast_crate.externals {
+        fill_index(&mut lc, m, AbsolutePath::new_extern(name.clone()));
+    }
 
     resolve_mod(&lc, &mut ast_crate.module, AbsolutePath::new_current());
 
@@ -114,6 +119,7 @@ fn fill_index(lc: &mut LookupCache, module: &crate::ast::items::Module, path: Ab
         },
         }
     }
+    println!("INDEX {path}: V={:?} T={:?}", mod_index.values, mod_index.types);
     lc.modules.insert(path, mod_index);
 }
 
@@ -440,7 +446,7 @@ impl<'a> Context<'a> {
         match par {
         PathParent::Module(item_scope) => {
             let Some(v) = item_scope.values.get(c) else {
-                panic!("{span}: Unable to find component {c} of path {p:?}", p=p);
+                panic!("{span}: Unable to find component {c} of path {p:?} (searching in {pp})", p=p, pp=item_scope.path);
             };
             return v.clone();
         },

@@ -3,6 +3,7 @@ use parser::lex::{Ident,Span};
 
 mod ast;
 mod parser;
+mod load_crates;
 mod expand;
 mod resolve;
 mod typecheck;
@@ -35,11 +36,15 @@ fn main() {
         ast::Crate {
             module: parsed.module,
             attributes: parsed.self_attrs,
+            externals: Default::default(),
             }
         };
 
     // 2. Expand (apply macros and conditional compilation)
     expand::expand_crate(&mut ast_crate);
+
+    // Load referenced libraries (crates)
+    load_crates::visit_crate(&mut ast_crate);
 
     resolve::resolve(&mut ast_crate);
 

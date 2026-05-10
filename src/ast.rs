@@ -18,6 +18,7 @@ pub struct Crate {
     pub module: items::Module,
 
     // TODO: Parsed crate attributes
+    pub externals: ::std::collections::HashMap<crate::Ident, items::Module>,
 }
 
 #[derive(Clone)]

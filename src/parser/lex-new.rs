@@ -8,6 +8,9 @@ static INTERNER: ::std::sync::Mutex<Option<::string_interner::DefaultStringInter
 #[derive(PartialOrd,Ord,PartialEq,Eq)]
 pub struct Ident(::string_interner::DefaultSymbol);
 impl Ident {
+    pub fn from_str(v: &str) -> Self {
+        Ident(INTERNER.lock().unwrap().get_or_insert_default().get_or_intern(v))
+    }
     pub fn len(&self) -> usize {
         match INTERNER.lock().unwrap().get_or_insert_default().resolve(self.0) {
         Some(v) => v.len(),
@@ -80,7 +83,7 @@ impl Span
         Span { path: None, line: 0, ofs: 0, end_line: 0, end_ofs: 0 }
     }
     pub fn new_extern() -> Self {
-        todo!()
+        Span { path: None, line: 0, ofs: 0, end_line: 0, end_ofs: 0 }
     }
     pub(super) fn new(start: PointSpan, end: PointSpan) -> Self {
         Span {

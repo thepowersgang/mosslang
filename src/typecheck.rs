@@ -24,6 +24,9 @@ pub fn typecheck(ast_crate: &mut crate::ast::Crate)
 
     let mut lc = LookupContext::default();
     enumerate_mod(&mut lc, &ast_crate.module, &AbsolutePath::new_current());
+    for (n,m) in &ast_crate.externals {
+        enumerate_mod(&mut lc, m, &AbsolutePath::new_extern(n.clone()));
+    }
 
     typecheck_mod(&lc, &mut ast_crate.module)
 }
