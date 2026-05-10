@@ -43,6 +43,7 @@ pub fn generate(output: &::std::path::Path, isa_name: &str, krate: crate::ast::C
         for item in &module.items {
             use crate::ast::items::ItemType;
             match item.ty {
+            ItemType::Module(ref module) => enum_module(state, module, path.append(item.name.clone().unwrap())),
             ItemType::ExternBlock(ref b) => {
                 for item in &b.items {
                     use crate::ast::items::ExternItemType;
@@ -62,7 +63,7 @@ pub fn generate(output: &::std::path::Path, isa_name: &str, krate: crate::ast::C
             ItemType::Constant(ref v) => {
                 let val = match &v.value {
                     crate::ast::items::ConstantValue::Unknown(expr_root) => expr_root,
-                    crate::ast::items::ConstantValue::Evaluated(items) => todo!(),
+                    crate::ast::items::ConstantValue::Evaluated(items) => todo!("Evaluated constant"),
                 };
                 state.inner.constants.insert(path.append(item.name.clone().unwrap()), val);
             },
@@ -86,6 +87,9 @@ pub fn generate(output: &::std::path::Path, isa_name: &str, krate: crate::ast::C
         }
     }
     enum_module(&mut state, &krate.module, AbsolutePath::new_current());
+    for (n,m) in &krate.externals {
+        enum_module(&mut state, m, AbsolutePath::new_extern(n.clone()));
+    }
     state.visit_module(AbsolutePath::new_current(), &krate.module);
     state.out.finalise()?;
     Ok( () )

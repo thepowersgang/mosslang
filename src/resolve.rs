@@ -200,6 +200,9 @@ fn resolve_type_aliases(ast_crate: &mut crate::ast::Crate)
 {
     let mut s = State { aliases: Default::default() };
     s.enum_from(&ast_crate.module, AbsolutePath::new_current());
+    for (n,m) in &ast_crate.externals {
+        s.enum_from(m, AbsolutePath::new_extern(n.clone()));
+    }
     s.resolve_in(&mut ast_crate.module);
 
     use crate::ast::items::ItemType;
@@ -221,12 +224,28 @@ fn resolve_type_aliases(ast_crate: &mut crate::ast::Crate)
         fn resolve_in(&self, module: &mut crate::ast::items::Module) {
             for v in &mut module.items {
                 match &mut v.ty {
-                ItemType::Module(m) => self.resolve_in(m),
-                ItemType::TypeAlias(t) => {
-                    self.resolve_in_ty(t);
-                },
+                ItemType::Module(module) => self.resolve_in(module),
+                ItemType::TypeAlias(t) => self.resolve_in_ty(t),
+                ItemType::Function(f) => self.resolve_in_fcn_sig(&mut f.sig),
+                ItemType::Static(s) => self.resolve_in_ty(&mut s.ty),
+                ItemType::Constant(s) => self.resolve_in_ty(&mut s.ty),
+                ItemType::ExternBlock(eb) => {
+                    for i in &mut eb.items {
+                        use crate::ast::items::ExternItemType;
+                        match &mut i.ty {
+                        ExternItemType::Function(function_signature) => self.resolve_in_fcn_sig(function_signature),
+                        ExternItemType::Static(extern_static) => self.resolve_in_ty(&mut extern_static.ty),
+                        }
+                    }
+                }
                 _ => {},
                 }
+            }
+        }
+        fn resolve_in_fcn_sig(&self, sig: &mut crate::ast::items::FunctionSignature) {
+            self.resolve_in_ty(&mut sig.ret);
+            for (_,t) in &mut sig.args {
+                self.resolve_in_ty(t);
             }
         }
         fn resolve_in_ty(&self, ty: &mut crate::ast::Type) {
