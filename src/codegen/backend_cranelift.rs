@@ -63,7 +63,7 @@ impl Context
     }
 
     /// Forward-declare a function, allowing Cranelift generation to know its signature
-    pub fn declare_function(&mut self, state: &super::InnerState, path: AbsolutePath, fcn_sig: &crate::ast::items::FunctionSignature, is_extern: bool) {
+    pub fn declare_function(&mut self, state: &super::InnerState, path: AbsolutePath, mangled_name: &str,fcn_sig: &crate::ast::items::FunctionSignature, is_extern: bool) {
         let indirect_return;
         let sig = {
             let cc = if cfg!(target_os="windows") {
@@ -92,15 +92,15 @@ impl Context
         else {
             cranelift_module::Linkage::Export
         };
-        let def_id = self.module.declare_function(&mangle_path(&path), linkage, &sig).expect("declare_function");
+        let def_id = self.module.declare_function(mangled_name, linkage, &sig).expect("declare_function");
         //let cr_name = self.allocate_user_func_name();
         let cr_name = cr_ir::UserFuncName::user(0, def_id.as_u32());
         let variadic_after = fcn_sig.is_variadic.then_some(fcn_sig.args.len());
         self.functions.insert(path, DeclaredFunction { cr_name, def_id, sig, indirect_return, variadic_after });
     }
     /// Forward-declare a function, allowing Cranelift generation to know its signature
-    pub fn declare_external_static(&mut self, _state: &super::InnerState, path: AbsolutePath, _ty: &crate::ast::Type) {
-        let def_id = self.module.declare_data(&mangle_path(&path), cranelift_module::Linkage::Import, false, false).expect("extern declare_data");
+    pub fn declare_external_static(&mut self, _state: &super::InnerState, path: AbsolutePath, mangled_name: &str, _ty: &crate::ast::Type) {
+        let def_id = self.module.declare_data(mangled_name, cranelift_module::Linkage::Import, false, false).expect("extern declare_data");
         //let name = self.allocate_user_func_name();
         let cr_name = cr_ir::UserFuncName::user(0, def_id.as_u32());
         self.statics.insert(path, DeclaredStatic { cr_name/*, def_id*/ });
@@ -1243,20 +1243,5 @@ fn is_type_complex(t: &crate::ast::Type) -> bool {
     }
     else {
         false
-    }
-}
-fn mangle_path(path: &AbsolutePath) -> String {
-    // HACK: Only mangle if multiple entries
-    if path.1.len() != 1 {
-        use std::fmt::Write;
-        let mut rv = String::new();
-        let _ = write!(&mut rv, "_ZM");
-        for v in &path.1 {
-            let _ = write!(&mut rv, "{}{}", v.len(), v);
-        }
-        rv
-    }
-    else {
-        path.1[0].to_string()
     }
 }

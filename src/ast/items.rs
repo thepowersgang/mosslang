@@ -134,6 +134,7 @@ pub struct Static
     pub ty: super::Type,
     #[serde(skip, default="ConstantValue::external")]
     pub value: ConstantValue,
+    pub linkage: Linkage,
 }
 #[derive(serde::Deserialize,serde::Serialize)]
 pub struct Constant
@@ -157,8 +158,15 @@ pub struct FunctionSignature
     pub args: Vec<(super::Pattern, super::Type)>,
     pub is_variadic: bool,
     pub ret: super::Type,
+    pub linkage: Linkage,
 }
 
+#[derive(Default)]
+#[derive(serde::Deserialize,serde::Serialize)]
+pub struct Linkage
+{
+    pub name: Option<String>,
+}
 
 pub enum ConstantValue {
     Unknown(crate::ast::ExprRoot),

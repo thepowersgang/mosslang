@@ -41,7 +41,7 @@ pub enum Root
 #[derive(Clone,Hash)]
 #[derive(PartialOrd,Ord,PartialEq,Eq)]
 #[derive(serde::Deserialize,serde::Serialize)]
-pub struct AbsolutePath(Option<crate::Ident>, pub Vec<crate::Ident>);
+pub struct AbsolutePath(pub Option<crate::Ident>, pub Vec<crate::Ident>);
 impl AbsolutePath {
     pub fn new_current() -> Self {
         AbsolutePath(None, Default::default())

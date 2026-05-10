@@ -49,13 +49,14 @@ pub fn generate(output: &::std::path::Path, isa_name: &str, krate: crate::ast::C
                     use crate::ast::items::ExternItemType;
                     match &item.ty {
                     ExternItemType::Function(v) => {
+                        let p = path.append(item.name.clone());
                         #[cfg(feature="cranelift")]
-                        state.out.declare_function(&state.inner, path.append(item.name.clone()), v, true);
+                        state.out.declare_function(&state.inner, p, &item.name.to_string(), v, true);
                     },
                     ExternItemType::Static(v) => {
                         state.inner.statics.insert(path.append(item.name.clone()), &v.ty);
                         #[cfg(feature="cranelift")]
-                        state.out.declare_external_static(&state.inner, path.append(item.name.clone()), &v.ty);
+                        state.out.declare_external_static(&state.inner, path.append(item.name.clone()), &item.name.to_string(), &v.ty);
                     },
                     }
                 }
@@ -79,8 +80,17 @@ pub fn generate(output: &::std::path::Path, isa_name: &str, krate: crate::ast::C
                 state.inner.field_types.insert(ap.clone(), s.fields.iter().map(|v| &v.ty).collect());
             },
             ItemType::Function(ref f) => {
+                let path = path.append(item.name.as_ref().unwrap().clone());
+                let mangled_name;
+                let mangled_name = match &f.sig.linkage.name {
+                    Some(n) => n,
+                    None => {
+                        mangled_name = mangle_path(&path);
+                        &mangled_name
+                    },
+                };
                 #[cfg(feature="cranelift")]
-                state.out.declare_function(&state.inner, path.append(item.name.as_ref().unwrap().clone()), &f.sig, false);
+                state.out.declare_function(&state.inner, path, mangled_name, &f.sig, false);
             }
             _ => {},
             }
@@ -231,4 +241,21 @@ impl<'a> State<'a> {
         };
         ir::dump_static(&mut self.ofp_ssa_ir, &path, &s.ty, ssa_ir.get());
     }
+}
+
+fn mangle_path(path: &AbsolutePath) -> String {
+    // HACK: Only mangle if multiple entries
+    use std::fmt::Write;
+    let mut rv = String::new();
+    let _ = write!(&mut rv, "_ZM");
+    if let Some(ref v) = path.0 {
+        let _ = write!(&mut rv, "{}{}", v.len(), v);
+    }
+    else {
+        let _ = write!(&mut rv, "0");
+    }
+    for v in &path.1 {
+        let _ = write!(&mut rv, "{}{}", v.len(), v);
+    }
+    rv
 }

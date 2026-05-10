@@ -203,6 +203,7 @@ pub fn parse_module(lex: &mut Lexer, mod_attrs: &mut Vec<crate::ast::Attribute>)
                 ty: ItemType::Static(crate::ast::items::Static {
                     ty,
                     value: crate::ast::items::ConstantValue::Unknown(val),
+                    linkage: Default::default(),
                     }),
             });
             },
@@ -448,5 +449,5 @@ fn parse_fn_hdr(lex: &mut Lexer, abi: crate::ast::AbiSpec) -> Result<(crate::Ide
         else {
             crate::ast::Type::new_unit( lex.end_span(&lex.start_span()) )
         };
-    Ok((name, crate::ast::items::FunctionSignature { abi, args, is_variadic, ret: ret_ty }))
+    Ok((name, crate::ast::items::FunctionSignature { abi, args, is_variadic, ret: ret_ty, linkage: Default::default(), }))
 }

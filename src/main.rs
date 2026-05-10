@@ -96,7 +96,11 @@ fn main() {
         }
     };
     match ty {
-    CrateType::Executable => {},
+    CrateType::Executable => {
+        let m = ast_crate.module.items.iter_mut().find(|v| v.name.as_ref().map(|i| *i == "main").unwrap_or(false));
+        let crate::ast::items::ItemType::Function(f) = &mut m.expect("no main?").ty else { panic!("main is usually a function"); };
+        f.sig.linkage.name = Some("main".to_owned());
+    },
     CrateType::Library => {
         let path = output_path.with_extension("moss-meta");
         match metadata::save_crate(&path, &ast_crate) {
